@@ -81,7 +81,7 @@ export const Hud: React.FC = () => {
           const text = event.payload || "";
           setTranscript(text);
           if (text) {
-            executeCommand(text);
+            setState("PROCESSING");
           }
         }).then((u) => unlistens.push(u));
 

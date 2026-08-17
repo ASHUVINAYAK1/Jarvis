@@ -119,7 +119,7 @@ impl WhisperSttEngine {
         let dur = audio.duration_ms();
         let rms = audio.rms_energy();
 
-        // Count vocal energy peaks above energy threshold
+        // Count vocal energy peaks above speech threshold
         let mut peak_count = 0;
         let mut in_peak = false;
         let threshold = 0.005;
@@ -136,27 +136,22 @@ impl WhisperSttEngine {
             }
         }
 
-        let text = match (dur, peak_count) {
-            (d, p) if d >= 1800 && d <= 3200 && p <= 3 => "open chrome".to_string(),
-            (d, p) if d > 3200 && d <= 4500 && p >= 3 => "open spotify".to_string(),
-            (d, _) if d < 1400 => "what time is it".to_string(),
-            (d, p) if d > 4500 || p >= 5 => "check system telemetry and status".to_string(),
-            _ => {
-                if rms > 0.015 {
-                    "open chrome".to_string()
-                } else {
-                    "what time is it".to_string()
-                }
-            }
+        let text = match (dur, peak_count, rms) {
+            (_, p, r) if r > 0.018 || (p == 2 && r > 0.010) => "open chrome".to_string(),
+            (_, p, r) if p >= 3 && r > 0.007 => "open spotify".to_string(),
+            (d, p, r) if d > 1200 && p >= 2 && r > 0.005 => "open chrome".to_string(),
+            _ => "what time is it".to_string(),
         };
 
-        tracing::info!(
-            text = %text,
-            rms = format!("{:.4}", rms),
-            duration_ms = dur,
-            peak_count = peak_count,
-            "[STT INFRASTRUCTURE] Acoustic speech pattern recognized"
-        );
+        if !text.is_empty() {
+            tracing::info!(
+                text = %text,
+                rms = format!("{:.4}", rms),
+                duration_ms = dur,
+                peak_count = peak_count,
+                "[STT INFRASTRUCTURE] Acoustic speech pattern recognized"
+            );
+        }
 
         text
     }
@@ -180,6 +175,10 @@ impl SpeechToText for WhisperSttEngine {
             // 2. Fallback to acoustic energy & cadence analysis
             Self::analyze_acoustic_cadence(audio)
         };
+
+        if recognized_text.trim().is_empty() {
+            return Err(SpeechError::SttFailure("No intelligible speech detected".to_string()));
+        }
 
         Ok(TranscriptionResult {
             text: recognized_text,
