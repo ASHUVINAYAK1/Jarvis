@@ -19,6 +19,7 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 async-trait = { workspace = true }
 cpal = "0.15"
+reqwest = { workspace = true }
 
 # Workspace internal crate dependencies
 jarvis-event-bus = { path = "../../core/event-bus" }
