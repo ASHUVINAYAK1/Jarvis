@@ -35,9 +35,7 @@ async fn execute_command(
 }
 
 #[tauri::command]
-async fn trigger_wake_word(
-    state: State<'_, Arc<Mutex<JarvisState>>>,
-) -> Result<String, String> {
+async fn trigger_wake_word(state: State<'_, Arc<Mutex<JarvisState>>>) -> Result<String, String> {
     let guard = state.lock().await;
     guard
         .voice_controller
