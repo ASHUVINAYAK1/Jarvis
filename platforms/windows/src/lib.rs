@@ -26,9 +26,8 @@ use async_trait::async_trait;
 use tracing::{info, instrument, warn};
 
 use jarvis_platform::{
-    ClipboardContent, DiskInfo, ImageFormat, LaunchOptions, MemoryInfo,
-    NotificationRequest, OperatingSystem, PlatformAdapter, PlatformInfo, ProcessInfo, Rect,
-    Screenshot, WindowInfo,
+    ClipboardContent, DiskInfo, ImageFormat, LaunchOptions, MemoryInfo, NotificationRequest,
+    OperatingSystem, PlatformAdapter, PlatformInfo, ProcessInfo, Rect, Screenshot, WindowInfo,
 };
 
 // ============================================================
@@ -80,20 +79,28 @@ impl WindowsPlatformAdapter {
         aliases.insert("zoom".to_string(), "Zoom.exe".to_string());
         aliases.insert("spotify".to_string(), "Spotify.exe".to_string());
 
-        Self { app_aliases: aliases }
+        Self {
+            app_aliases: aliases,
+        }
     }
 
     /// Resolve an app name/alias to an executable path.
     fn resolve_app(&self, app: &str) -> String {
-        let clean = app.trim().trim_matches(|c| c == '.' || c == ',' || c == '!' || c == '?' || c == '"' || c == '\'');
-        let normalized = clean.to_lowercase();
-        let target_name = self.app_aliases.get(&normalized).cloned().unwrap_or_else(|| {
-            if clean.ends_with(".exe") || clean.contains('/') || clean.contains('\\') {
-                clean.to_string()
-            } else {
-                format!("{}.exe", clean)
-            }
+        let clean = app.trim().trim_matches(|c| {
+            c == '.' || c == ',' || c == '!' || c == '?' || c == '"' || c == '\''
         });
+        let normalized = clean.to_lowercase();
+        let target_name = self
+            .app_aliases
+            .get(&normalized)
+            .cloned()
+            .unwrap_or_else(|| {
+                if clean.ends_with(".exe") || clean.contains('/') || clean.contains('\\') {
+                    clean.to_string()
+                } else {
+                    format!("{}.exe", clean)
+                }
+            });
 
         // If it's already an absolute path and exists, return it
         let path = PathBuf::from(&target_name);
@@ -105,25 +112,47 @@ impl WindowsPlatformAdapter {
         let mut search_paths = Vec::new();
 
         if let Ok(prog_files) = std::env::var("ProgramFiles") {
-            search_paths.push(format!("{}\\Google\\Chrome\\Application\\chrome.exe", prog_files));
+            search_paths.push(format!(
+                "{}\\Google\\Chrome\\Application\\chrome.exe",
+                prog_files
+            ));
             search_paths.push(format!("{}\\Mozilla Firefox\\firefox.exe", prog_files));
-            search_paths.push(format!("{}\\Microsoft\\Edge\\Application\\msedge.exe", prog_files));
+            search_paths.push(format!(
+                "{}\\Microsoft\\Edge\\Application\\msedge.exe",
+                prog_files
+            ));
             search_paths.push(format!("{}\\Microsoft VS Code\\Code.exe", prog_files));
         }
         if let Ok(prog_files_x86) = std::env::var("ProgramFiles(x86)") {
-            search_paths.push(format!("{}\\Google\\Chrome\\Application\\chrome.exe", prog_files_x86));
-            search_paths.push(format!("{}\\Microsoft\\Edge\\Application\\msedge.exe", prog_files_x86));
+            search_paths.push(format!(
+                "{}\\Google\\Chrome\\Application\\chrome.exe",
+                prog_files_x86
+            ));
+            search_paths.push(format!(
+                "{}\\Microsoft\\Edge\\Application\\msedge.exe",
+                prog_files_x86
+            ));
         }
         if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
-            search_paths.push(format!("{}\\Google\\Chrome\\Application\\chrome.exe", local_app_data));
-            search_paths.push(format!("{}\\Programs\\Microsoft VS Code\\Code.exe", local_app_data));
+            search_paths.push(format!(
+                "{}\\Google\\Chrome\\Application\\chrome.exe",
+                local_app_data
+            ));
+            search_paths.push(format!(
+                "{}\\Programs\\Microsoft VS Code\\Code.exe",
+                local_app_data
+            ));
         }
 
         // Match against known search paths if searching for chrome/firefox/etc
         for p in &search_paths {
             let p_buf = PathBuf::from(p);
             if p_buf.exists() {
-                let file_name = p_buf.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
+                let file_name = p_buf
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_lowercase();
                 if file_name == target_name.to_lowercase() {
                     return p.clone();
                 }
@@ -228,7 +257,7 @@ impl PlatformAdapter for WindowsPlatformAdapter {
         if !opts.wait {
             // Forget the child so it runs independently
             let _ = child.id(); // We've read the PID
-            // Don't call child.wait() — let it run independently
+                                // Don't call child.wait() — let it run independently
             std::mem::forget(child);
         } else {
             let status = child.wait().await?;
@@ -306,9 +335,9 @@ impl PlatformAdapter for WindowsPlatformAdapter {
     async fn is_application_running(&self, app: &str) -> Result<bool> {
         let executable = self.resolve_app(app);
         let processes = self.list_processes().await?;
-        let running = processes.iter().any(|p| {
-            p.name.to_lowercase() == executable.to_lowercase()
-        });
+        let running = processes
+            .iter()
+            .any(|p| p.name.to_lowercase() == executable.to_lowercase());
         Ok(running)
     }
 
@@ -335,8 +364,8 @@ impl PlatformAdapter for WindowsPlatformAdapter {
         }
 
         // Parse JSON output
-        let json: serde_json::Value = serde_json::from_str(&stdout)
-            .unwrap_or(serde_json::Value::Array(Vec::new()));
+        let json: serde_json::Value =
+            serde_json::from_str(&stdout).unwrap_or(serde_json::Value::Array(Vec::new()));
 
         let items = match &json {
             serde_json::Value::Array(arr) => arr.clone(),
@@ -367,7 +396,8 @@ impl PlatformAdapter for WindowsPlatformAdapter {
 
     async fn focus_window(&self, window_handle: &str) -> Result<()> {
         // Use powershell to focus a window by PID
-        let pid = window_handle.parse::<u32>()
+        let pid = window_handle
+            .parse::<u32>()
             .map_err(|_| anyhow!("Invalid window handle: {}", window_handle))?;
 
         let script = format!(
@@ -396,7 +426,8 @@ impl PlatformAdapter for WindowsPlatformAdapter {
     }
 
     async fn minimize_window(&self, window_handle: &str) -> Result<()> {
-        let pid = window_handle.parse::<u32>()
+        let pid = window_handle
+            .parse::<u32>()
             .map_err(|_| anyhow!("Invalid window handle: {}", window_handle))?;
 
         let _script = format!(
@@ -410,8 +441,11 @@ impl PlatformAdapter for WindowsPlatformAdapter {
 
         // Simplified: use ShowWindow API via powershell
         tokio::process::Command::new("powershell")
-            .args(["-NoProfile", "-Command",
-                &format!("(Get-Process -Id {pid} -ErrorAction SilentlyContinue).MainWindowHandle")])
+            .args([
+                "-NoProfile",
+                "-Command",
+                &format!("(Get-Process -Id {pid} -ErrorAction SilentlyContinue).MainWindowHandle"),
+            ])
             .output()
             .await
             .ok();
@@ -464,17 +498,15 @@ $ms.Dispose()
         }
 
         let b64 = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let data = base64::Engine::decode(
-            &base64::engine::general_purpose::STANDARD,
-            &b64,
-        ).map_err(|e| anyhow!("Failed to decode screenshot: {}", e))?;
+        let data = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &b64)
+            .map_err(|e| anyhow!("Failed to decode screenshot: {}", e))?;
 
         info!(bytes = %data.len(), "Screenshot captured");
 
         Ok(Screenshot {
             data,
             format: ImageFormat::Png,
-            width: 0,  // TODO: parse from image
+            width: 0, // TODO: parse from image
             height: 0,
             display_index: 0,
         })
@@ -486,7 +518,8 @@ $ms.Dispose()
     }
 
     async fn take_screenshot_region(&self, region: Rect) -> Result<Screenshot> {
-        let script = format!(r#"
+        let script = format!(
+            r#"
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
@@ -501,8 +534,10 @@ $bitmap.Dispose()
 $ms.Dispose()
 [Convert]::ToBase64String($bytes)
 "#,
-            x = region.x, y = region.y,
-            width = region.width, height = region.height
+            x = region.x,
+            y = region.y,
+            width = region.width,
+            height = region.height
         );
 
         let output = tokio::process::Command::new("powershell")
@@ -511,10 +546,8 @@ $ms.Dispose()
             .await?;
 
         let b64 = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let data = base64::Engine::decode(
-            &base64::engine::general_purpose::STANDARD,
-            &b64,
-        ).map_err(|e| anyhow!("Failed to decode screenshot region: {}", e))?;
+        let data = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &b64)
+            .map_err(|e| anyhow!("Failed to decode screenshot region: {}", e))?;
 
         Ok(Screenshot {
             data,
@@ -546,13 +579,19 @@ $ms.Dispose()
                 // Escape single quotes in text
                 let escaped = text.replace('\'', "''");
                 tokio::process::Command::new("powershell")
-                    .args(["-NoProfile", "-Command", &format!("Set-Clipboard -Value '{}'", escaped)])
+                    .args([
+                        "-NoProfile",
+                        "-Command",
+                        &format!("Set-Clipboard -Value '{}'", escaped),
+                    ])
                     .output()
                     .await
                     .map_err(|e| anyhow!("Failed to set clipboard: {}", e))?;
                 Ok(())
             }
-            _ => Err(anyhow!("Only text clipboard content is currently supported on Windows")),
+            _ => Err(anyhow!(
+                "Only text clipboard content is currently supported on Windows"
+            )),
         }
     }
 
@@ -584,15 +623,16 @@ $toast = New-Object Windows.UI.Notifications.ToastNotification($xml)
     async fn get_disk_space(&self) -> Result<DiskInfo> {
         let output = tokio::process::Command::new("powershell")
             .args([
-                "-NoProfile", "-Command",
-                "Get-PSDrive C | Select-Object Used,Free | ConvertTo-Json"
+                "-NoProfile",
+                "-Command",
+                "Get-PSDrive C | Select-Object Used,Free | ConvertTo-Json",
             ])
             .output()
             .await?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let json: serde_json::Value = serde_json::from_str(&stdout)
-            .unwrap_or(serde_json::json!({"Used": 0, "Free": 0}));
+        let json: serde_json::Value =
+            serde_json::from_str(&stdout).unwrap_or(serde_json::json!({"Used": 0, "Free": 0}));
 
         let used = json["Used"].as_u64().unwrap_or(0);
         let free = json["Free"].as_u64().unwrap_or(0);
@@ -615,8 +655,8 @@ $toast = New-Object Windows.UI.Notifications.ToastNotification($xml)
             .await?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let json: serde_json::Value = serde_json::from_str(&stdout)
-            .unwrap_or(serde_json::json!({}));
+        let json: serde_json::Value =
+            serde_json::from_str(&stdout).unwrap_or(serde_json::json!({}));
 
         // Values are in KB
         let total_kb = json["TotalVisibleMemorySize"].as_u64().unwrap_or(0);
@@ -626,7 +666,11 @@ $toast = New-Object Windows.UI.Notifications.ToastNotification($xml)
         let available = free_kb * 1024;
         let used = total.saturating_sub(available);
 
-        Ok(MemoryInfo { total_bytes: total, available_bytes: available, used_bytes: used })
+        Ok(MemoryInfo {
+            total_bytes: total,
+            available_bytes: available,
+            used_bytes: used,
+        })
     }
 }
 
@@ -636,7 +680,11 @@ $toast = New-Object Windows.UI.Notifications.ToastNotification($xml)
 
 fn get_windows_version() -> String {
     std::process::Command::new("powershell")
-        .args(["-NoProfile", "-Command", "(Get-WmiObject Win32_OperatingSystem).Caption"])
+        .args([
+            "-NoProfile",
+            "-Command",
+            "(Get-WmiObject Win32_OperatingSystem).Caption",
+        ])
         .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         .unwrap_or_else(|_| "Windows".to_string())
@@ -733,7 +781,9 @@ mod tests {
     async fn test_clipboard_roundtrip() {
         let a = adapter();
         let test_text = "JARVIS clipboard test 12345";
-        a.set_clipboard(ClipboardContent::Text(test_text.to_string())).await.unwrap();
+        a.set_clipboard(ClipboardContent::Text(test_text.to_string()))
+            .await
+            .unwrap();
         let content = a.get_clipboard().await.unwrap();
         if let ClipboardContent::Text(text) = content {
             assert_eq!(text, test_text);

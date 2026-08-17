@@ -160,7 +160,9 @@ impl IpcTransport for MemoryTransport {
 
         match timeout(timeout_duration, self.sender.send(bytes)).await {
             Ok(Ok(())) => Ok(()),
-            Ok(Err(_)) => Err(IpcError::TransportError("Channel receiver closed".to_string())),
+            Ok(Err(_)) => Err(IpcError::TransportError(
+                "Channel receiver closed".to_string(),
+            )),
             Err(_) => Err(IpcError::Timeout {
                 duration_ms: timeout_duration.as_millis() as u64,
             }),
@@ -172,9 +174,12 @@ impl IpcTransport for MemoryTransport {
         timeout_duration: Duration,
     ) -> Result<IpcEnvelope, IpcError> {
         match timeout(timeout_duration, self.receiver.recv()).await {
-            Ok(Some(bytes)) => IpcEnvelope::from_bytes(&bytes)
-                .map_err(|e| IpcError::ProtocolError(e.to_string())),
-            Ok(None) => Err(IpcError::TransportError("Channel sender closed".to_string())),
+            Ok(Some(bytes)) => {
+                IpcEnvelope::from_bytes(&bytes).map_err(|e| IpcError::ProtocolError(e.to_string()))
+            }
+            Ok(None) => Err(IpcError::TransportError(
+                "Channel sender closed".to_string(),
+            )),
             Err(_) => Err(IpcError::Timeout {
                 duration_ms: timeout_duration.as_millis() as u64,
             }),
@@ -194,7 +199,9 @@ impl IpcTransport for MemoryTransport {
 #[cfg(windows)]
 pub mod windows_pipe {
     use super::*;
-    use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient, NamedPipeServer, ServerOptions};
+    use tokio::net::windows::named_pipe::{
+        ClientOptions, NamedPipeClient, NamedPipeServer, ServerOptions,
+    };
 
     /// Windows Named Pipe Server Transport.
     pub struct WindowsNamedPipeServerTransport {
@@ -206,16 +213,17 @@ pub mod windows_pipe {
             let server = ServerOptions::new()
                 .first_pipe_instance(true)
                 .create(pipe_path)
-                .map_err(|e| IpcError::TransportError(format!("Failed to create Named Pipe: {}", e)))?;
+                .map_err(|e| {
+                    IpcError::TransportError(format!("Failed to create Named Pipe: {}", e))
+                })?;
 
             Ok(Self { server })
         }
 
         pub async fn wait_for_client(&mut self) -> Result<(), IpcError> {
-            self.server
-                .connect()
-                .await
-                .map_err(|e| IpcError::TransportError(format!("Named Pipe connection failed: {}", e)))
+            self.server.connect().await.map_err(|e| {
+                IpcError::TransportError(format!("Named Pipe connection failed: {}", e))
+            })
         }
     }
 
@@ -253,9 +261,9 @@ pub mod windows_pipe {
         }
 
         async fn close(&mut self) -> Result<(), IpcError> {
-            self.server
-                .disconnect()
-                .map_err(|e| IpcError::TransportError(format!("Named Pipe disconnect failed: {}", e)))
+            self.server.disconnect().map_err(|e| {
+                IpcError::TransportError(format!("Named Pipe disconnect failed: {}", e))
+            })
         }
     }
 
@@ -266,9 +274,12 @@ pub mod windows_pipe {
 
     impl WindowsNamedPipeClientTransport {
         pub async fn connect(pipe_path: &str) -> Result<Self, IpcError> {
-            let client = ClientOptions::new()
-                .open(pipe_path)
-                .map_err(|e| IpcError::Unavailable(format!("Could not connect to Named Pipe '{}': {}", pipe_path, e)))?;
+            let client = ClientOptions::new().open(pipe_path).map_err(|e| {
+                IpcError::Unavailable(format!(
+                    "Could not connect to Named Pipe '{}': {}",
+                    pipe_path, e
+                ))
+            })?;
 
             Ok(Self { client })
         }

@@ -1,13 +1,21 @@
-﻿[package]
+[package]
 name = "jarvis-linux"
 version.workspace = true
 edition.workspace = true
 
-# Linux platform adapter
+# Linux platform adapter implementing PlatformAdapter for Linux (Ubuntu 22.04+, GNOME, X11/Wayland).
+# Phase 6 execution
 
 [dependencies]
 tokio = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+async-trait = { workspace = true }
+base64 = { version = "0.22" }
+hostname = { version = "0.4" }
+
+# Local dependency
+jarvis-platform = { path = "../../crates/platform" }

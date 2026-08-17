@@ -11,9 +11,9 @@ use tracing::instrument;
 
 use crate::provider::ModelProvider;
 use crate::types::{
-    ChatRole, ModelCapabilities, ModelChunk, ModelError, ModelInfo,
-    ModelProviderType, ModelRequest, ModelResponse, ModelStream, ModelToolCall, ModelUsage,
-    ProviderHealth, ResponseFormat,
+    ChatRole, ModelCapabilities, ModelChunk, ModelError, ModelInfo, ModelProviderType,
+    ModelRequest, ModelResponse, ModelStream, ModelToolCall, ModelUsage, ProviderHealth,
+    ResponseFormat,
 };
 
 /// Ollama provider implementation.
@@ -143,9 +143,10 @@ impl ModelProvider for OllamaProvider {
 
         match res {
             Ok(resp) if resp.status().is_success() => {
-                let ver: OllamaVersionResponse = resp.json().await.unwrap_or(OllamaVersionResponse {
-                    version: "unknown".to_string(),
-                });
+                let ver: OllamaVersionResponse =
+                    resp.json().await.unwrap_or(OllamaVersionResponse {
+                        version: "unknown".to_string(),
+                    });
 
                 let models = self.list_models().await.unwrap_or_default();
 
@@ -208,7 +209,10 @@ impl ModelProvider for OllamaProvider {
                 .and_then(|d| d.family.clone())
                 .unwrap_or_else(|| "unknown".to_string());
             let param_count = item.details.as_ref().and_then(|d| d.parameter_size.clone());
-            let quant = item.details.as_ref().and_then(|d| d.quantization_level.clone());
+            let quant = item
+                .details
+                .as_ref()
+                .and_then(|d| d.quantization_level.clone());
 
             let modified = item
                 .modified_at
@@ -218,7 +222,9 @@ impl ModelProvider for OllamaProvider {
             let capabilities = ModelCapabilities {
                 text_generation: true,
                 streaming: true,
-                tool_calling: id.contains("qwen") || id.contains("llama3") || id.contains("mistral"),
+                tool_calling: id.contains("qwen")
+                    || id.contains("llama3")
+                    || id.contains("mistral"),
                 structured_output: true,
                 json_mode: true,
                 vision: id.contains("vision") || id.contains("llava") || id.contains("minicpm"),
@@ -447,14 +453,18 @@ impl ModelProvider for OllamaProvider {
                                 continue;
                             }
 
-                            if let Ok(chunk_resp) = serde_json::from_str::<OllamaChatResponse>(&line) {
+                            if let Ok(chunk_resp) =
+                                serde_json::from_str::<OllamaChatResponse>(&line)
+                            {
                                 let chunk = ModelChunk {
                                     delta_text: chunk_resp.message.content,
                                     delta_tool_calls: Vec::new(),
                                     is_done: chunk_resp.done,
                                     usage: if chunk_resp.done {
                                         Some(ModelUsage {
-                                            prompt_tokens: chunk_resp.prompt_eval_count.unwrap_or(0),
+                                            prompt_tokens: chunk_resp
+                                                .prompt_eval_count
+                                                .unwrap_or(0),
                                             completion_tokens: chunk_resp.eval_count.unwrap_or(0),
                                             total_tokens: chunk_resp.prompt_eval_count.unwrap_or(0)
                                                 + chunk_resp.eval_count.unwrap_or(0),

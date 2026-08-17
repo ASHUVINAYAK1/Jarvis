@@ -114,7 +114,12 @@ impl ToolResult {
         }
     }
 
-    pub fn failure(request_id: String, tool_name: String, error_msg: String, elapsed_ms: u64) -> Self {
+    pub fn failure(
+        request_id: String,
+        tool_name: String,
+        error_msg: String,
+        elapsed_ms: u64,
+    ) -> Self {
         Self {
             request_id,
             tool_name,
@@ -365,7 +370,10 @@ impl ToolRegistry {
 
     /// List all registered tool definitions.
     pub fn list_definitions(&self) -> Vec<ToolDefinition> {
-        self.tools.values().map(|t| t.definition().clone()).collect()
+        self.tools
+            .values()
+            .map(|t| t.definition().clone())
+            .collect()
     }
 
     /// Execute a tool request with context.
@@ -434,27 +442,67 @@ mod tests {
             })
         }
 
-        async fn close_application(&self, _app: &str) -> anyhow::Result<()> { Ok(()) }
-        async fn list_processes(&self) -> anyhow::Result<Vec<ProcessInfo>> { Ok(vec![]) }
-        async fn is_application_running(&self, _app: &str) -> anyhow::Result<bool> { Ok(true) }
-        async fn list_windows(&self) -> anyhow::Result<Vec<WindowInfo>> { Ok(vec![]) }
-        async fn focus_window(&self, _handle: &str) -> anyhow::Result<()> { Ok(()) }
-        async fn minimize_window(&self, _handle: &str) -> anyhow::Result<()> { Ok(()) }
-        async fn maximize_window(&self, _handle: &str) -> anyhow::Result<()> { Ok(()) }
-        async fn set_window_bounds(&self, _handle: &str, _bounds: Rect) -> anyhow::Result<()> { Ok(()) }
-        async fn take_screenshot(&self) -> anyhow::Result<Screenshot> {
-            Ok(Screenshot { data: vec![], format: ImageFormat::Png, width: 100, height: 100, display_index: 0 })
+        async fn close_application(&self, _app: &str) -> anyhow::Result<()> {
+            Ok(())
         }
-        async fn take_screenshot_display(&self, _idx: u32) -> anyhow::Result<Screenshot> { self.take_screenshot().await }
-        async fn take_screenshot_region(&self, _r: Rect) -> anyhow::Result<Screenshot> { self.take_screenshot().await }
-        async fn get_clipboard(&self) -> anyhow::Result<ClipboardContent> { Ok(ClipboardContent::Empty) }
-        async fn set_clipboard(&self, _c: ClipboardContent) -> anyhow::Result<()> { Ok(()) }
-        async fn show_notification(&self, _n: NotificationRequest) -> anyhow::Result<()> { Ok(()) }
+        async fn list_processes(&self) -> anyhow::Result<Vec<ProcessInfo>> {
+            Ok(vec![])
+        }
+        async fn is_application_running(&self, _app: &str) -> anyhow::Result<bool> {
+            Ok(true)
+        }
+        async fn list_windows(&self) -> anyhow::Result<Vec<WindowInfo>> {
+            Ok(vec![])
+        }
+        async fn focus_window(&self, _handle: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn minimize_window(&self, _handle: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn maximize_window(&self, _handle: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn set_window_bounds(&self, _handle: &str, _bounds: Rect) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn take_screenshot(&self) -> anyhow::Result<Screenshot> {
+            Ok(Screenshot {
+                data: vec![],
+                format: ImageFormat::Png,
+                width: 100,
+                height: 100,
+                display_index: 0,
+            })
+        }
+        async fn take_screenshot_display(&self, _idx: u32) -> anyhow::Result<Screenshot> {
+            self.take_screenshot().await
+        }
+        async fn take_screenshot_region(&self, _r: Rect) -> anyhow::Result<Screenshot> {
+            self.take_screenshot().await
+        }
+        async fn get_clipboard(&self) -> anyhow::Result<ClipboardContent> {
+            Ok(ClipboardContent::Empty)
+        }
+        async fn set_clipboard(&self, _c: ClipboardContent) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn show_notification(&self, _n: NotificationRequest) -> anyhow::Result<()> {
+            Ok(())
+        }
         async fn get_disk_space(&self) -> anyhow::Result<DiskInfo> {
-            Ok(DiskInfo { total_bytes: 1000, available_bytes: 500, used_bytes: 500 })
+            Ok(DiskInfo {
+                total_bytes: 1000,
+                available_bytes: 500,
+                used_bytes: 500,
+            })
         }
         async fn get_memory_info(&self) -> anyhow::Result<MemoryInfo> {
-            Ok(MemoryInfo { total_bytes: 1000, available_bytes: 500, used_bytes: 500 })
+            Ok(MemoryInfo {
+                total_bytes: 1000,
+                available_bytes: 500,
+                used_bytes: 500,
+            })
         }
     }
 

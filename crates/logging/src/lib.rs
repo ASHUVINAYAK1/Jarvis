@@ -18,11 +18,7 @@
 
 use std::env;
 
-use tracing_subscriber::{
-    EnvFilter,
-    fmt,
-    prelude::*,
-};
+use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 /// Initialize the JARVIS logging subsystem.
 ///
@@ -34,8 +30,7 @@ pub fn init_logging() {
     let log_level = env::var("JARVIS_LOG_LEVEL").unwrap_or_else(|_| "info".to_string());
     let log_format = env::var("JARVIS_LOG_FORMAT").unwrap_or_else(|_| "pretty".to_string());
 
-    let env_filter = EnvFilter::try_new(&log_level)
-        .unwrap_or_else(|_| EnvFilter::new("info"));
+    let env_filter = EnvFilter::try_new(&log_level).unwrap_or_else(|_| EnvFilter::new("info"));
 
     match log_format.as_str() {
         "json" => {

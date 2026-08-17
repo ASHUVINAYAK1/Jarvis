@@ -133,7 +133,10 @@ impl VoiceSessionController {
 
     /// Process a completed audio speech segment through STT → AI Gateway → TTS → Speaker Output.
     #[instrument(skip(self, speech_chunk))]
-    pub async fn process_speech_utterance(&self, speech_chunk: AudioChunk) -> Result<String, SpeechError> {
+    pub async fn process_speech_utterance(
+        &self,
+        speech_chunk: AudioChunk,
+    ) -> Result<String, SpeechError> {
         // 1. Transition to Transcribing
         self.transition_state(VoiceSessionState::Transcribing).await;
 
@@ -152,11 +155,14 @@ impl VoiceSessionController {
         self.transition_state(VoiceSessionState::Thinking).await;
 
         let response_text = if let Some(ai) = &self.ai_gateway {
-            ai.ask(&stt_res.text).await.unwrap_or_else(|e| {
-                format!("I apologize, sir. I encountered an error: {}", e)
-            })
+            ai.ask(&stt_res.text)
+                .await
+                .unwrap_or_else(|e| format!("I apologize, sir. I encountered an error: {}", e))
         } else {
-            format!("Processing query: '{}'. Systems nominal, sir.", stt_res.text)
+            format!(
+                "Processing query: '{}'. Systems nominal, sir.",
+                stt_res.text
+            )
         };
 
         // 3. Transition to Speaking / TTS

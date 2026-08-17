@@ -65,15 +65,15 @@ impl AudioDeviceManager for DefaultAudioDeviceManager {
 
     async fn default_microphone(&self) -> Result<AudioDeviceInfo, SpeechError> {
         let list = self.list_microphones().await?;
-        list.into_iter().next().ok_or_else(|| {
-            SpeechError::DeviceUnavailable("No microphone device found".to_string())
-        })
+        list.into_iter()
+            .next()
+            .ok_or_else(|| SpeechError::DeviceUnavailable("No microphone device found".to_string()))
     }
 
     async fn default_speaker(&self) -> Result<AudioDeviceInfo, SpeechError> {
         let list = self.list_speakers().await?;
-        list.into_iter().next().ok_or_else(|| {
-            SpeechError::DeviceUnavailable("No speaker device found".to_string())
-        })
+        list.into_iter()
+            .next()
+            .ok_or_else(|| SpeechError::DeviceUnavailable("No speaker device found".to_string()))
     }
 }

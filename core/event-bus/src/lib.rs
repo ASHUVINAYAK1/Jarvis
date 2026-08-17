@@ -71,16 +71,45 @@ pub enum JarvisEvent {
 
 #[derive(Debug, Clone)]
 pub enum TaskEvent {
-    Created { task_id: String, name: String },
-    Started { task_id: String },
-    Paused { task_id: String, reason: String },
-    Resumed { task_id: String },
-    Completed { task_id: String, summary: Option<String> },
-    Failed { task_id: String, error: String },
-    Cancelled { task_id: String },
-    StepStarted { task_id: String, step_index: u32, description: String },
-    StepCompleted { task_id: String, step_index: u32 },
-    StepFailed { task_id: String, step_index: u32, error: String },
+    Created {
+        task_id: String,
+        name: String,
+    },
+    Started {
+        task_id: String,
+    },
+    Paused {
+        task_id: String,
+        reason: String,
+    },
+    Resumed {
+        task_id: String,
+    },
+    Completed {
+        task_id: String,
+        summary: Option<String>,
+    },
+    Failed {
+        task_id: String,
+        error: String,
+    },
+    Cancelled {
+        task_id: String,
+    },
+    StepStarted {
+        task_id: String,
+        step_index: u32,
+        description: String,
+    },
+    StepCompleted {
+        task_id: String,
+        step_index: u32,
+    },
+    StepFailed {
+        task_id: String,
+        step_index: u32,
+        error: String,
+    },
 }
 
 // ============================================================
@@ -132,7 +161,11 @@ pub enum VoiceEvent {
     /// Voice activity ended (silence detected).
     SpeechEnded,
     /// Audio transcribed to text.
-    Transcribed { text: String, confidence: f32, language: String },
+    Transcribed {
+        text: String,
+        confidence: f32,
+        language: String,
+    },
     /// TTS synthesis started.
     SynthesisStarted { text: String },
     /// TTS synthesis completed.
@@ -147,12 +180,26 @@ pub enum VoiceEvent {
 
 #[derive(Debug, Clone)]
 pub enum HealthEvent {
-    ServiceStarting { service_name: String },
-    ServiceReady { service_name: String },
-    ServiceDegraded { service_name: String, reason: String },
-    ServiceFailed { service_name: String, error: String },
-    ServiceStopping { service_name: String },
-    ServiceStopped { service_name: String },
+    ServiceStarting {
+        service_name: String,
+    },
+    ServiceReady {
+        service_name: String,
+    },
+    ServiceDegraded {
+        service_name: String,
+        reason: String,
+    },
+    ServiceFailed {
+        service_name: String,
+        error: String,
+    },
+    ServiceStopping {
+        service_name: String,
+    },
+    ServiceStopped {
+        service_name: String,
+    },
 }
 
 // ============================================================
@@ -187,10 +234,21 @@ pub enum SecurityEvent {
 
 #[derive(Debug, Clone)]
 pub enum MeshEvent {
-    DeviceDiscovered { device_id: String, device_type: String },
-    DeviceConnected { device_id: String },
-    DeviceDisconnected { device_id: String },
-    TaskMigrated { task_id: String, from_device: String, to_device: String },
+    DeviceDiscovered {
+        device_id: String,
+        device_type: String,
+    },
+    DeviceConnected {
+        device_id: String,
+    },
+    DeviceDisconnected {
+        device_id: String,
+    },
+    TaskMigrated {
+        task_id: String,
+        from_device: String,
+        to_device: String,
+    },
 }
 
 // ============================================================
@@ -311,7 +369,8 @@ mod tests {
 
         bus.publish(JarvisEvent::Health(HealthEvent::ServiceReady {
             service_name: "orchestrator".to_string(),
-        })).await;
+        }))
+        .await;
 
         assert!(sub1.recv().await.is_ok());
         assert!(sub2.recv().await.is_ok());
@@ -321,9 +380,11 @@ mod tests {
     async fn test_no_subscribers_does_not_panic() {
         let bus = EventBus::new(64);
         // No subscriber — should not panic
-        let count = bus.publish(JarvisEvent::Voice(VoiceEvent::WakeWordDetected {
-            confidence: 0.95,
-        })).await;
+        let count = bus
+            .publish(JarvisEvent::Voice(VoiceEvent::WakeWordDetected {
+                confidence: 0.95,
+            }))
+            .await;
         assert_eq!(count, 0);
     }
 
@@ -336,7 +397,8 @@ mod tests {
             text: "open Chrome".to_string(),
             confidence: 0.98,
             language: "en-US".to_string(),
-        })).await;
+        }))
+        .await;
 
         if let Ok(JarvisEvent::Voice(VoiceEvent::Transcribed { text, .. })) = sub.recv().await {
             assert_eq!(text, "open Chrome");
@@ -354,9 +416,12 @@ mod tests {
             request_id: "req_001".to_string(),
             tool_name: "send_email".to_string(),
             action_description: "Send email to user@example.com".to_string(),
-        })).await;
+        }))
+        .await;
 
-        if let Ok(JarvisEvent::Tool(ToolEvent::ApprovalRequested { tool_name, .. })) = sub.recv().await {
+        if let Ok(JarvisEvent::Tool(ToolEvent::ApprovalRequested { tool_name, .. })) =
+            sub.recv().await
+        {
             assert_eq!(tool_name, "send_email");
         } else {
             panic!("Expected ApprovalRequested event");

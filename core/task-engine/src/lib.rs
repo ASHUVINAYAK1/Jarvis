@@ -106,10 +106,7 @@ impl TaskState {
 
     /// Returns true if the task is currently blocking on human input.
     pub fn is_waiting_for_human(&self) -> bool {
-        matches!(
-            self,
-            TaskState::Paused | TaskState::AwaitingApproval
-        )
+        matches!(self, TaskState::Paused | TaskState::AwaitingApproval)
     }
 
     /// Returns true if this transition is valid.
@@ -444,7 +441,11 @@ impl TaskRepository for InMemoryTaskRepository {
 
     async fn get_by_state(&self, state: TaskState) -> Result<Vec<Task>, TaskError> {
         let guard = self.tasks.read().await;
-        Ok(guard.values().filter(|t| t.state == state).cloned().collect())
+        Ok(guard
+            .values()
+            .filter(|t| t.state == state)
+            .cloned()
+            .collect())
     }
 
     async fn get_interrupted_tasks(&self) -> Result<Vec<Task>, TaskError> {
@@ -454,7 +455,10 @@ impl TaskRepository for InMemoryTaskRepository {
             .filter(|t| {
                 matches!(
                     t.state,
-                    TaskState::Running | TaskState::Paused | TaskState::AwaitingApproval | TaskState::Recovering
+                    TaskState::Running
+                        | TaskState::Paused
+                        | TaskState::AwaitingApproval
+                        | TaskState::Recovering
                 )
             })
             .cloned()
@@ -468,7 +472,8 @@ impl TaskRepository for InMemoryTaskRepository {
             if task.state == TaskState::Running {
                 task.state = TaskState::Recovering;
                 task.updated_at = Utc::now();
-                task.error_message = Some("Task interrupted by ungraceful daemon termination.".to_string());
+                task.error_message =
+                    Some("Task interrupted by ungraceful daemon termination.".to_string());
                 reconciled.push(task.clone());
             }
         }
@@ -557,7 +562,10 @@ mod tests {
 
         assert_eq!(loaded.state, TaskState::Running);
         assert_eq!(loaded.steps.len(), 1);
-        assert_eq!(loaded.steps[0].tool_name, Some("open_application".to_string()));
+        assert_eq!(
+            loaded.steps[0].tool_name,
+            Some("open_application".to_string())
+        );
 
         // Perform crash reconciliation
         let reconciled = repo_reopened.reconcile_crashed_tasks().await.unwrap();

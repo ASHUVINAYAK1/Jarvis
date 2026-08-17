@@ -52,11 +52,14 @@ mod tests {
     #[test]
     fn test_vad_state_machine() {
         let mut vad = VoiceActivityDetector::new().with_threshold(0.01);
-        assert_eq!(vad.process_chunk(&AudioChunk {
-            samples: vec![0.0; 1600],
-            format: AudioFormat::default(),
-            timestamp_ms: 0,
-        }), VadState::Silence);
+        assert_eq!(
+            vad.process_chunk(&AudioChunk {
+                samples: vec![0.0; 1600],
+                format: AudioFormat::default(),
+                timestamp_ms: 0,
+            }),
+            VadState::Silence
+        );
 
         // Feed speech energy
         let speech_chunk = AudioChunk {
@@ -141,7 +144,10 @@ mod tests {
         assert_eq!(controller.current_state().await, VoiceSessionState::Idle);
 
         controller.trigger_wake_word().await.unwrap();
-        assert_eq!(controller.current_state().await, VoiceSessionState::Listening);
+        assert_eq!(
+            controller.current_state().await,
+            VoiceSessionState::Listening
+        );
 
         // Verify VoiceEvent::WakeWordDetected was broadcast
         assert!(rx.recv().await.is_ok());

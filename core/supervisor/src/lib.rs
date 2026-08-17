@@ -262,7 +262,9 @@ impl Supervisor {
         let services = self.services.read().await;
         let svc_mutex = services
             .get(name)
-            .ok_or_else(|| SupervisorError::ServiceNotFound { name: name.to_string() })?;
+            .ok_or_else(|| SupervisorError::ServiceNotFound {
+                name: name.to_string(),
+            })?;
 
         let mut svc = svc_mutex.lock().await;
 
@@ -349,7 +351,9 @@ impl Supervisor {
         let services = self.services.read().await;
         let svc_mutex = services
             .get(name)
-            .ok_or_else(|| SupervisorError::ServiceNotFound { name: name.to_string() })?;
+            .ok_or_else(|| SupervisorError::ServiceNotFound {
+                name: name.to_string(),
+            })?;
 
         let mut svc = svc_mutex.lock().await;
         svc.health = ServiceHealth::Stopping;

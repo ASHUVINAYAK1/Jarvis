@@ -7,8 +7,8 @@ use tracing::instrument;
 
 use crate::provider::ModelProvider;
 use crate::types::{
-    ChatRole, ModelCapabilities, ModelError, ModelInfo, ModelProviderType,
-    ModelRequest, ModelResponse, ModelStream, ModelUsage, ProviderHealth,
+    ChatRole, ModelCapabilities, ModelError, ModelInfo, ModelProviderType, ModelRequest,
+    ModelResponse, ModelStream, ModelUsage, ProviderHealth,
 };
 
 /// llama.cpp provider implementation.
@@ -109,9 +109,10 @@ impl ModelProvider for LlamaCppProvider {
 
         match res {
             Ok(resp) if resp.status().is_success() => {
-                let body: LlamaCppHealthResponse = resp.json().await.unwrap_or(LlamaCppHealthResponse {
-                    status: Some("ok".to_string()),
-                });
+                let body: LlamaCppHealthResponse =
+                    resp.json().await.unwrap_or(LlamaCppHealthResponse {
+                        status: Some("ok".to_string()),
+                    });
 
                 Ok(ProviderHealth {
                     provider_type: ModelProviderType::LlamaCpp,
@@ -171,7 +172,10 @@ impl ModelProvider for LlamaCppProvider {
     #[instrument(skip(self, request))]
     async fn generate(&self, request: &ModelRequest) -> Result<ModelResponse, ModelError> {
         let start_time = Instant::now();
-        let url = format!("{}/v1/chat/completions", self.endpoint.trim_end_matches('/'));
+        let url = format!(
+            "{}/v1/chat/completions",
+            self.endpoint.trim_end_matches('/')
+        );
 
         let mut messages = Vec::new();
         for msg in &request.messages {
@@ -188,7 +192,10 @@ impl ModelProvider for LlamaCppProvider {
         }
 
         let req_body = OpenAiChatRequest {
-            model: request.model_id.clone().unwrap_or_else(|| self.model_alias.clone()),
+            model: request
+                .model_id
+                .clone()
+                .unwrap_or_else(|| self.model_alias.clone()),
             messages,
             stream: false,
             temperature: request.temperature,
@@ -222,11 +229,14 @@ impl ModelProvider for LlamaCppProvider {
         })?;
 
         let text = choice.message.content.unwrap_or_default();
-        let usage = body.usage.map(|u| ModelUsage {
-            prompt_tokens: u.prompt_tokens,
-            completion_tokens: u.completion_tokens,
-            total_tokens: u.total_tokens,
-        }).unwrap_or_default();
+        let usage = body
+            .usage
+            .map(|u| ModelUsage {
+                prompt_tokens: u.prompt_tokens,
+                completion_tokens: u.completion_tokens,
+                total_tokens: u.total_tokens,
+            })
+            .unwrap_or_default();
 
         let latency_ms = start_time.elapsed().as_millis() as u64;
 

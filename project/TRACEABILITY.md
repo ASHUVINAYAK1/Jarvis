@@ -98,16 +98,16 @@
 
 | Req ID | Requirement | Source Doc | Phase | Milestone | Status |
 |--------|-------------|-----------|-------|-----------|--------|
-| R-W01 | Windows application launching | Doc 4, 9 | 6 | M06.02 | PLANNED |
-| R-W02 | Windows window management | Doc 4, 9 | 6 | M06.03 | PLANNED |
-| R-W03 | Windows UI Automation (accessibility tree) | Doc 4, 9 | 8, 14 | M08.04 | PLANNED |
-| R-W04 | Windows keyboard/mouse control | Doc 4, 9 | 14 | M14.02 | PLANNED |
-| R-W05 | Windows auto-start on login | Doc 9 | 14 | M14.03 | PLANNED |
-| R-W06 | Windows Credential Manager | Doc 9, 14 | 11, 14 | M11.04 | PLANNED |
-| R-L01 | Linux application launching | Doc 4, 10 | 15 | M15.01 | PLANNED |
-| R-L02 | Linux Wayland + X11 support | Doc 4, 10 | 15 | M15.02-03 | PLANNED |
-| R-L03 | Linux AT-SPI accessibility | Doc 10 | 15 | M15.04 | PLANNED |
-| R-L04 | Linux systemd startup service | Doc 10 | 15 | M15.05 | PLANNED |
+| R-W01 | Windows application launching | Doc 4, 9 | 6 | M06.02 | platforms/windows | test_app_alias_resolution | VERIFIED |
+| R-W02 | Windows window management | Doc 4, 9 | 6 | M06.03 | platforms/windows | test_get_platform_info | VERIFIED |
+| R-W03 | Windows UI Automation (accessibility tree) | Doc 4, 9 | 8, 14 | M08.04 | — | — | PLANNED |
+| R-W04 | Windows keyboard/mouse control | Doc 4, 9 | 14 | M14.02 | — | — | PLANNED |
+| R-W05 | Windows auto-start on login | Doc 9 | 14 | M14.03 | — | — | PLANNED |
+| R-W06 | Windows Credential Manager | Doc 9, 14 | 11, 14 | M11.04 | — | — | PLANNED |
+| R-L01 | Linux application launching | Doc 4, 10 | 6 | M06.02 | platforms/linux | test_application_resolver_aliases | VERIFIED |
+| R-L02 | Linux Wayland + X11 support | Doc 4, 10 | 6 | M06.02 | platforms/linux | test_display_server_detection | VERIFIED |
+| R-L03 | Linux AT-SPI accessibility | Doc 10 | 15 | M15.04 | — | — | PLANNED |
+| R-L04 | Linux systemd startup service | Doc 10 | 15 | M15.05 | — | — | PLANNED |
 | R-A01 | Android voice interface | Doc 11 | 16 | M16.02 | PLANNED |
 | R-A02 | Android foreground service | Doc 11 | 16 | M16.03 | PLANNED |
 | R-A03 | Android PC connection/pairing | Doc 11 | 16 | M16.04 | PLANNED |

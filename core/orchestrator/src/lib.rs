@@ -155,7 +155,10 @@ impl Orchestrator {
             });
         }
 
-        Err(anyhow!("Could not determine intent for command: '{}'", command))
+        Err(anyhow!(
+            "Could not determine intent for command: '{}'",
+            command
+        ))
     }
 
     /// Execute a command through the complete architectural pipeline.
@@ -322,7 +325,9 @@ impl Orchestrator {
                 }
             }
             Ok(result) => {
-                let error_msg = result.error.unwrap_or_else(|| "Tool execution failed".to_string());
+                let error_msg = result
+                    .error
+                    .unwrap_or_else(|| "Tool execution failed".to_string());
                 self.event_bus
                     .publish(JarvisEvent::Tool(ToolEvent::Failed {
                         request_id: tool_req.request_id,
@@ -368,7 +373,9 @@ impl Orchestrator {
     fn generate_spoken_response(&self, tool_name: &str, result: &ToolResult) -> String {
         match tool_name {
             "open_application" => {
-                let app = result.data.get("application")
+                let app = result
+                    .data
+                    .get("application")
                     .and_then(|v| v.as_str())
                     .unwrap_or("the application");
                 let capitalized = {
@@ -381,8 +388,16 @@ impl Orchestrator {
                 format!("{} is open, sir.", capitalized)
             }
             "get_time" => {
-                let time = result.data.get("time").and_then(|v| v.as_str()).unwrap_or("");
-                let date = result.data.get("date").and_then(|v| v.as_str()).unwrap_or("");
+                let time = result
+                    .data
+                    .get("time")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let date = result
+                    .data
+                    .get("date")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
                 format!("It is currently {}, {}.", time, date)
             }
             _ => "Action completed, sir.".to_string(),
@@ -416,7 +431,11 @@ mod tests {
                 temp_dir: std::path::PathBuf::from("C:\\Temp"),
             })
         }
-        async fn open_application(&self, app: &str, _opts: Option<LaunchOptions>) -> Result<ProcessInfo> {
+        async fn open_application(
+            &self,
+            app: &str,
+            _opts: Option<LaunchOptions>,
+        ) -> Result<ProcessInfo> {
             if self.fail {
                 anyhow::bail!("Process creation failed");
             }
@@ -428,27 +447,67 @@ mod tests {
                 running: true,
             })
         }
-        async fn close_application(&self, _app: &str) -> Result<()> { Ok(()) }
-        async fn list_processes(&self) -> Result<Vec<ProcessInfo>> { Ok(vec![]) }
-        async fn is_application_running(&self, _app: &str) -> Result<bool> { Ok(true) }
-        async fn list_windows(&self) -> Result<Vec<WindowInfo>> { Ok(vec![]) }
-        async fn focus_window(&self, _h: &str) -> Result<()> { Ok(()) }
-        async fn minimize_window(&self, _h: &str) -> Result<()> { Ok(()) }
-        async fn maximize_window(&self, _h: &str) -> Result<()> { Ok(()) }
-        async fn set_window_bounds(&self, _h: &str, _b: Rect) -> Result<()> { Ok(()) }
-        async fn take_screenshot(&self) -> Result<Screenshot> {
-            Ok(Screenshot { data: vec![], format: ImageFormat::Png, width: 0, height: 0, display_index: 0 })
+        async fn close_application(&self, _app: &str) -> Result<()> {
+            Ok(())
         }
-        async fn take_screenshot_display(&self, _i: u32) -> Result<Screenshot> { self.take_screenshot().await }
-        async fn take_screenshot_region(&self, _r: Rect) -> Result<Screenshot> { self.take_screenshot().await }
-        async fn get_clipboard(&self) -> Result<ClipboardContent> { Ok(ClipboardContent::Empty) }
-        async fn set_clipboard(&self, _c: ClipboardContent) -> Result<()> { Ok(()) }
-        async fn show_notification(&self, _n: NotificationRequest) -> Result<()> { Ok(()) }
+        async fn list_processes(&self) -> Result<Vec<ProcessInfo>> {
+            Ok(vec![])
+        }
+        async fn is_application_running(&self, _app: &str) -> Result<bool> {
+            Ok(true)
+        }
+        async fn list_windows(&self) -> Result<Vec<WindowInfo>> {
+            Ok(vec![])
+        }
+        async fn focus_window(&self, _h: &str) -> Result<()> {
+            Ok(())
+        }
+        async fn minimize_window(&self, _h: &str) -> Result<()> {
+            Ok(())
+        }
+        async fn maximize_window(&self, _h: &str) -> Result<()> {
+            Ok(())
+        }
+        async fn set_window_bounds(&self, _h: &str, _b: Rect) -> Result<()> {
+            Ok(())
+        }
+        async fn take_screenshot(&self) -> Result<Screenshot> {
+            Ok(Screenshot {
+                data: vec![],
+                format: ImageFormat::Png,
+                width: 0,
+                height: 0,
+                display_index: 0,
+            })
+        }
+        async fn take_screenshot_display(&self, _i: u32) -> Result<Screenshot> {
+            self.take_screenshot().await
+        }
+        async fn take_screenshot_region(&self, _r: Rect) -> Result<Screenshot> {
+            self.take_screenshot().await
+        }
+        async fn get_clipboard(&self) -> Result<ClipboardContent> {
+            Ok(ClipboardContent::Empty)
+        }
+        async fn set_clipboard(&self, _c: ClipboardContent) -> Result<()> {
+            Ok(())
+        }
+        async fn show_notification(&self, _n: NotificationRequest) -> Result<()> {
+            Ok(())
+        }
         async fn get_disk_space(&self) -> Result<DiskInfo> {
-            Ok(DiskInfo { total_bytes: 1, available_bytes: 1, used_bytes: 0 })
+            Ok(DiskInfo {
+                total_bytes: 1,
+                available_bytes: 1,
+                used_bytes: 0,
+            })
         }
         async fn get_memory_info(&self) -> Result<MemoryInfo> {
-            Ok(MemoryInfo { total_bytes: 1, available_bytes: 1, used_bytes: 0 })
+            Ok(MemoryInfo {
+                total_bytes: 1,
+                available_bytes: 1,
+                used_bytes: 0,
+            })
         }
     }
 
@@ -462,7 +521,12 @@ mod tests {
         let outcome = orchestrator.execute_command("open chrome").await;
 
         match outcome {
-            ExecutionOutcome::Success { spoken_response, tool_name, tool_data, .. } => {
+            ExecutionOutcome::Success {
+                spoken_response,
+                tool_name,
+                tool_data,
+                ..
+            } => {
                 assert_eq!(tool_name, "open_application");
                 assert_eq!(spoken_response, "Chrome is open, sir.");
                 assert_eq!(tool_data["pid"], 1234);

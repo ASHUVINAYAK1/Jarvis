@@ -20,10 +20,10 @@
 //!
 //! IMPLEMENTATION STATUS: Phase 11 / Vertical Slice 1 Foundation
 
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use thiserror::Error;
-use tracing::{warn, instrument};
+use tracing::{instrument, warn};
 
 /// Autonomy level configuration for JARVIS (0 to 5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -72,9 +72,7 @@ pub enum PolicyDecision {
         suggested_action: String,
     },
     /// Execution is blocked entirely by security policy.
-    Denied {
-        reason: String,
-    },
+    Denied { reason: String },
 }
 
 impl PolicyDecision {
@@ -182,30 +180,26 @@ impl PolicyEngine {
                     }
                 }
             }
-            AutonomyLevel::Level3Conservative => {
-                match effective_risk {
-                    RiskLevel::Low | RiskLevel::Medium => PolicyDecision::Allowed,
-                    RiskLevel::High | RiskLevel::Critical => PolicyDecision::ApprovalRequired {
-                        reason: format!(
-                            "Tool '{}' is classified as {:?} risk and requires user authorization.",
-                            tool_name, effective_risk
-                        ),
-                        suggested_action: format!("Execute high-risk tool '{}'", tool_name),
-                    },
-                }
-            }
-            AutonomyLevel::Level4Automatic => {
-                match effective_risk {
-                    RiskLevel::Low | RiskLevel::Medium | RiskLevel::High => PolicyDecision::Allowed,
-                    RiskLevel::Critical => PolicyDecision::ApprovalRequired {
-                        reason: format!(
-                            "Critical action '{}' requires explicit confirmation.",
-                            tool_name
-                        ),
-                        suggested_action: format!("Authorize critical action '{}'", tool_name),
-                    },
-                }
-            }
+            AutonomyLevel::Level3Conservative => match effective_risk {
+                RiskLevel::Low | RiskLevel::Medium => PolicyDecision::Allowed,
+                RiskLevel::High | RiskLevel::Critical => PolicyDecision::ApprovalRequired {
+                    reason: format!(
+                        "Tool '{}' is classified as {:?} risk and requires user authorization.",
+                        tool_name, effective_risk
+                    ),
+                    suggested_action: format!("Execute high-risk tool '{}'", tool_name),
+                },
+            },
+            AutonomyLevel::Level4Automatic => match effective_risk {
+                RiskLevel::Low | RiskLevel::Medium | RiskLevel::High => PolicyDecision::Allowed,
+                RiskLevel::Critical => PolicyDecision::ApprovalRequired {
+                    reason: format!(
+                        "Critical action '{}' requires explicit confirmation.",
+                        tool_name
+                    ),
+                    suggested_action: format!("Authorize critical action '{}'", tool_name),
+                },
+            },
             AutonomyLevel::Level5Full => {
                 if effective_risk == RiskLevel::Critical {
                     PolicyDecision::ApprovalRequired {
@@ -236,21 +230,33 @@ mod tests {
     #[test]
     fn test_open_application_allowed_at_level_3() {
         let policy = PolicyEngine::new();
-        let decision = policy.evaluate("open_application", RiskLevel::Low, AutonomyLevel::Level3Conservative);
+        let decision = policy.evaluate(
+            "open_application",
+            RiskLevel::Low,
+            AutonomyLevel::Level3Conservative,
+        );
         assert_eq!(decision, PolicyDecision::Allowed);
     }
 
     #[test]
     fn test_tool_blocked_at_level_0() {
         let policy = PolicyEngine::new();
-        let decision = policy.evaluate("open_application", RiskLevel::Low, AutonomyLevel::Level0ChatOnly);
+        let decision = policy.evaluate(
+            "open_application",
+            RiskLevel::Low,
+            AutonomyLevel::Level0ChatOnly,
+        );
         assert!(matches!(decision, PolicyDecision::Denied { .. }));
     }
 
     #[test]
     fn test_critical_tool_requires_approval() {
         let policy = PolicyEngine::new();
-        let decision = policy.evaluate("delete_file", RiskLevel::Critical, AutonomyLevel::Level4Automatic);
+        let decision = policy.evaluate(
+            "delete_file",
+            RiskLevel::Critical,
+            AutonomyLevel::Level4Automatic,
+        );
         assert!(matches!(decision, PolicyDecision::ApprovalRequired { .. }));
     }
 

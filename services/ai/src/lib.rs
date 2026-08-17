@@ -38,15 +38,14 @@ pub use types::*;
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
     use futures::StreamExt;
+    use std::sync::Arc;
 
     use super::*;
 
     #[tokio::test]
     async fn test_mock_provider_health_and_generation() {
-        let provider = MockModelProvider::new()
-            .with_canned_text("Hello from JARVIS AI");
+        let provider = MockModelProvider::new().with_canned_text("Hello from JARVIS AI");
 
         let health = provider.check_health().await.unwrap();
         assert!(health.is_online);
@@ -64,8 +63,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mock_provider_streaming() {
-        let provider = MockModelProvider::new()
-            .with_canned_text("This is a streaming test");
+        let provider = MockModelProvider::new().with_canned_text("This is a streaming test");
 
         let req = ModelRequest::new().with_message(ChatMessage::user("Stream please"));
         let mut stream = provider.stream(&req).await.unwrap();
@@ -113,7 +111,8 @@ mod tests {
         }];
 
         let provider = Arc::new(MockModelProvider::new().with_canned_tool_calls(tool_calls));
-        let router = Arc::new(ModelRouter::new(ModelRoutingConfig::default()).with_provider(provider));
+        let router =
+            Arc::new(ModelRouter::new(ModelRoutingConfig::default()).with_provider(provider));
         let gateway = ModelGateway::new(router);
 
         let tools = vec![ToolSchema {

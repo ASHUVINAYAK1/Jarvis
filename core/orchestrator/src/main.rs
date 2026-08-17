@@ -68,14 +68,22 @@ async fn main() -> anyhow::Result<()> {
     println!();
     println!("  ----------------------------------------");
     match outcome {
-        ExecutionOutcome::Success { spoken_response, duration_ms, tool_name, tool_data, .. } => {
+        ExecutionOutcome::Success {
+            spoken_response,
+            duration_ms,
+            tool_name,
+            tool_data,
+            ..
+        } => {
             println!("  STATUS: SUCCESS ({}ms)", duration_ms);
             println!("  TOOL:   {}", tool_name);
             println!("  DATA:   {}", tool_data);
             println!();
             println!("  JARVIS: \"{}\"", spoken_response);
         }
-        ExecutionOutcome::ApprovalRequired { reason, tool_name, .. } => {
+        ExecutionOutcome::ApprovalRequired {
+            reason, tool_name, ..
+        } => {
             println!("  STATUS: APPROVAL REQUIRED");
             println!("  TOOL:   {}", tool_name);
             println!("  REASON: {}", reason);

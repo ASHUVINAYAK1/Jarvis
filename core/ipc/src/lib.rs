@@ -91,7 +91,9 @@ impl<T: IpcTransport> CoreIpcClient<T> {
         match resp_env.message_type {
             IpcMessageType::CommandResponse => {
                 let outcome: ExecutionOutcome = serde_json::from_str(&resp_env.payload_json)
-                    .map_err(|e| IpcError::ProtocolError(format!("Failed to parse response outcome: {}", e)))?;
+                    .map_err(|e| {
+                        IpcError::ProtocolError(format!("Failed to parse response outcome: {}", e))
+                    })?;
                 Ok(outcome)
             }
             _ => Err(IpcError::ProtocolError(format!(
@@ -121,8 +123,10 @@ impl<T: IpcTransport> CoreIpcClient<T> {
             .receive_envelope(self.timeout_duration)
             .await?;
 
-        let health: HealthStatusMessage = serde_json::from_str(&resp_env.payload_json)
-            .map_err(|e| IpcError::ProtocolError(format!("Failed to parse health status: {}", e)))?;
+        let health: HealthStatusMessage =
+            serde_json::from_str(&resp_env.payload_json).map_err(|e| {
+                IpcError::ProtocolError(format!("Failed to parse health status: {}", e))
+            })?;
 
         Ok(health)
     }
@@ -145,7 +149,11 @@ impl<T: IpcTransport> CoreIpcServer<T> {
     /// Process a single incoming IPC request and dispatch to the orchestrator.
     #[instrument(skip(self))]
     pub async fn handle_next_request(&mut self) -> Result<bool, IpcError> {
-        let envelope = match self.transport.receive_envelope(Duration::from_secs(60)).await {
+        let envelope = match self
+            .transport
+            .receive_envelope(Duration::from_secs(60))
+            .await
+        {
             Ok(env) => env,
             Err(IpcError::Timeout { .. }) => return Ok(true), // Keep alive
             Err(IpcError::TransportError(_)) => return Ok(false), // Connection closed
@@ -242,7 +250,11 @@ mod tests {
                 temp_dir: std::path::PathBuf::from("C:\\Temp"),
             })
         }
-        async fn open_application(&self, app: &str, _opts: Option<LaunchOptions>) -> Result<ProcessInfo> {
+        async fn open_application(
+            &self,
+            app: &str,
+            _opts: Option<LaunchOptions>,
+        ) -> Result<ProcessInfo> {
             Ok(ProcessInfo {
                 pid: 9999,
                 name: app.to_string(),
@@ -251,27 +263,67 @@ mod tests {
                 running: true,
             })
         }
-        async fn close_application(&self, _app: &str) -> Result<()> { Ok(()) }
-        async fn list_processes(&self) -> Result<Vec<ProcessInfo>> { Ok(vec![]) }
-        async fn is_application_running(&self, _app: &str) -> Result<bool> { Ok(true) }
-        async fn list_windows(&self) -> Result<Vec<WindowInfo>> { Ok(vec![]) }
-        async fn focus_window(&self, _h: &str) -> Result<()> { Ok(()) }
-        async fn minimize_window(&self, _h: &str) -> Result<()> { Ok(()) }
-        async fn maximize_window(&self, _h: &str) -> Result<()> { Ok(()) }
-        async fn set_window_bounds(&self, _h: &str, _b: Rect) -> Result<()> { Ok(()) }
-        async fn take_screenshot(&self) -> Result<Screenshot> {
-            Ok(Screenshot { data: vec![], format: ImageFormat::Png, width: 0, height: 0, display_index: 0 })
+        async fn close_application(&self, _app: &str) -> Result<()> {
+            Ok(())
         }
-        async fn take_screenshot_display(&self, _i: u32) -> Result<Screenshot> { self.take_screenshot().await }
-        async fn take_screenshot_region(&self, _r: Rect) -> Result<Screenshot> { self.take_screenshot().await }
-        async fn get_clipboard(&self) -> Result<ClipboardContent> { Ok(ClipboardContent::Empty) }
-        async fn set_clipboard(&self, _c: ClipboardContent) -> Result<()> { Ok(()) }
-        async fn show_notification(&self, _n: NotificationRequest) -> Result<()> { Ok(()) }
+        async fn list_processes(&self) -> Result<Vec<ProcessInfo>> {
+            Ok(vec![])
+        }
+        async fn is_application_running(&self, _app: &str) -> Result<bool> {
+            Ok(true)
+        }
+        async fn list_windows(&self) -> Result<Vec<WindowInfo>> {
+            Ok(vec![])
+        }
+        async fn focus_window(&self, _h: &str) -> Result<()> {
+            Ok(())
+        }
+        async fn minimize_window(&self, _h: &str) -> Result<()> {
+            Ok(())
+        }
+        async fn maximize_window(&self, _h: &str) -> Result<()> {
+            Ok(())
+        }
+        async fn set_window_bounds(&self, _h: &str, _b: Rect) -> Result<()> {
+            Ok(())
+        }
+        async fn take_screenshot(&self) -> Result<Screenshot> {
+            Ok(Screenshot {
+                data: vec![],
+                format: ImageFormat::Png,
+                width: 0,
+                height: 0,
+                display_index: 0,
+            })
+        }
+        async fn take_screenshot_display(&self, _i: u32) -> Result<Screenshot> {
+            self.take_screenshot().await
+        }
+        async fn take_screenshot_region(&self, _r: Rect) -> Result<Screenshot> {
+            self.take_screenshot().await
+        }
+        async fn get_clipboard(&self) -> Result<ClipboardContent> {
+            Ok(ClipboardContent::Empty)
+        }
+        async fn set_clipboard(&self, _c: ClipboardContent) -> Result<()> {
+            Ok(())
+        }
+        async fn show_notification(&self, _n: NotificationRequest) -> Result<()> {
+            Ok(())
+        }
         async fn get_disk_space(&self) -> Result<DiskInfo> {
-            Ok(DiskInfo { total_bytes: 1, available_bytes: 1, used_bytes: 0 })
+            Ok(DiskInfo {
+                total_bytes: 1,
+                available_bytes: 1,
+                used_bytes: 0,
+            })
         }
         async fn get_memory_info(&self) -> Result<MemoryInfo> {
-            Ok(MemoryInfo { total_bytes: 1, available_bytes: 1, used_bytes: 0 })
+            Ok(MemoryInfo {
+                total_bytes: 1,
+                available_bytes: 1,
+                used_bytes: 0,
+            })
         }
     }
 
@@ -296,7 +348,12 @@ mod tests {
         server_task.await.unwrap();
 
         match outcome {
-            ExecutionOutcome::Success { spoken_response, tool_name, tool_data, .. } => {
+            ExecutionOutcome::Success {
+                spoken_response,
+                tool_name,
+                tool_data,
+                ..
+            } => {
                 assert_eq!(tool_name, "open_application");
                 assert_eq!(spoken_response, "Chrome is open, sir.");
                 assert_eq!(tool_data["pid"], 9999);

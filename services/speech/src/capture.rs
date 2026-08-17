@@ -147,7 +147,10 @@ impl AudioCapture {
                     None,
                 ),
                 sample_format => {
-                    warn!(?sample_format, "Unsupported cpal sample format, falling back");
+                    warn!(
+                        ?sample_format,
+                        "Unsupported cpal sample format, falling back"
+                    );
                     return;
                 }
             };

@@ -31,7 +31,10 @@ impl Default for ModelRoutingConfig {
         category_models.insert(ModelCategory::Reasoning, "qwen2.5:14b".to_string());
         category_models.insert(ModelCategory::ToolCalling, "qwen2.5:7b".to_string());
         category_models.insert(ModelCategory::Vision, "llava:latest".to_string());
-        category_models.insert(ModelCategory::Embedding, "nomic-embed-text:latest".to_string());
+        category_models.insert(
+            ModelCategory::Embedding,
+            "nomic-embed-text:latest".to_string(),
+        );
 
         Self {
             default_category: ModelCategory::General,
@@ -76,9 +79,15 @@ impl ModelRouter {
     }
 
     /// Find an active provider capable of fulfilling the request.
-    pub fn resolve_provider(&self, provider_type: Option<ModelProviderType>) -> Option<Arc<dyn ModelProvider>> {
+    pub fn resolve_provider(
+        &self,
+        provider_type: Option<ModelProviderType>,
+    ) -> Option<Arc<dyn ModelProvider>> {
         if let Some(pt) = provider_type {
-            self.providers.iter().find(|p| p.provider_type() == pt).cloned()
+            self.providers
+                .iter()
+                .find(|p| p.provider_type() == pt)
+                .cloned()
         } else {
             self.providers.first().cloned()
         }
@@ -94,9 +103,10 @@ impl ModelRouter {
         }
 
         let target_category = request.category.unwrap_or(self.config.default_category);
-        let preferred_model = request.model_id.clone().or_else(|| {
-            self.config.category_models.get(&target_category).cloned()
-        });
+        let preferred_model = request
+            .model_id
+            .clone()
+            .or_else(|| self.config.category_models.get(&target_category).cloned());
 
         let mut req_with_model = request.clone();
         req_with_model.model_id = preferred_model.clone();
@@ -155,7 +165,9 @@ impl ModelRouter {
         }
 
         Err(last_error.unwrap_or_else(|| {
-            ModelError::RuntimeFailure("All configured AI providers and fallbacks failed".to_string())
+            ModelError::RuntimeFailure(
+                "All configured AI providers and fallbacks failed".to_string(),
+            )
         }))
     }
 

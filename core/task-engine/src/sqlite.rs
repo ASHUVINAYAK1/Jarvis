@@ -62,12 +62,14 @@ impl SqliteTaskRepository {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, TaskError> {
         let p = path.as_ref();
         if let Some(parent) = p.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| TaskError::Database(format!("Failed to create database directory: {}", e)))?;
+            std::fs::create_dir_all(parent).map_err(|e| {
+                TaskError::Database(format!("Failed to create database directory: {}", e))
+            })?;
         }
 
-        let conn = Connection::open(p)
-            .map_err(|e| TaskError::Database(format!("Failed to open SQLite database at {:?}: {}", p, e)))?;
+        let conn = Connection::open(p).map_err(|e| {
+            TaskError::Database(format!("Failed to open SQLite database at {:?}: {}", p, e))
+        })?;
 
         let repo = Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -81,7 +83,10 @@ impl SqliteTaskRepository {
     }
 
     fn init_pragmas_sync(&self) -> Result<(), TaskError> {
-        let guard = self.conn.lock().map_err(|_| TaskError::Database("Mutex poisoned".to_string()))?;
+        let guard = self
+            .conn
+            .lock()
+            .map_err(|_| TaskError::Database("Mutex poisoned".to_string()))?;
         guard
             .execute_batch(
                 "PRAGMA foreign_keys = ON;
@@ -94,10 +99,13 @@ impl SqliteTaskRepository {
     }
 
     fn apply_migrations_sync(&self) -> Result<(), TaskError> {
-        let mut guard = self.conn.lock().map_err(|_| TaskError::Database("Mutex poisoned".to_string()))?;
-        let tx = guard
-            .transaction()
-            .map_err(|e| TaskError::Database(format!("Failed to start migration transaction: {}", e)))?;
+        let mut guard = self
+            .conn
+            .lock()
+            .map_err(|_| TaskError::Database("Mutex poisoned".to_string()))?;
+        let tx = guard.transaction().map_err(|e| {
+            TaskError::Database(format!("Failed to start migration transaction: {}", e))
+        })?;
 
         // 1. Create migrations tracking table
         tx.execute(
@@ -112,11 +120,7 @@ impl SqliteTaskRepository {
 
         // 2. Query current migration version
         let current_version: Option<i32> = tx
-            .query_row(
-                "SELECT MAX(version) FROM _migrations",
-                [],
-                |row| row.get(0),
-            )
+            .query_row("SELECT MAX(version) FROM _migrations", [], |row| row.get(0))
             .optional()
             .map_err(|e| TaskError::Database(format!("Failed to query migration version: {}", e)))?
             .flatten();
@@ -321,54 +325,93 @@ impl TaskRepository for SqliteTaskRepository {
         let conn_arc = self.conn.clone();
 
         tokio::task::spawn_blocking(move || -> Result<Option<Task>, TaskError> {
-            let guard = conn_arc.lock().map_err(|_| TaskError::Database("Mutex poisoned".to_string()))?;
+            let guard = conn_arc
+                .lock()
+                .map_err(|_| TaskError::Database("Mutex poisoned".to_string()))?;
 
-            let row_res = guard.query_row(
-                "SELECT
+            let row_res = guard
+                .query_row(
+                    "SELECT
                     id, name, description, original_command, state, priority,
                     created_at_ms, updated_at_ms, started_at_ms, completed_at_ms,
                     current_step_index, error_message, result_summary,
                     origin_request_id, trace_id, parent_task_id,
                     max_steps, max_duration_secs, retry_count, max_retries, metadata_json
                  FROM tasks WHERE id = ?1",
-                params![task_id_str],
-                |row| {
-                    let id_str: String = row.get(0)?;
-                    let name: String = row.get(1)?;
-                    let description: String = row.get(2)?;
-                    let original_command: String = row.get(3)?;
-                    let state_str: String = row.get(4)?;
-                    let priority_val: i32 = row.get(5)?;
-                    let created_ms: i64 = row.get(6)?;
-                    let updated_ms: i64 = row.get(7)?;
-                    let started_ms: Option<i64> = row.get(8)?;
-                    let completed_ms: Option<i64> = row.get(9)?;
-                    let current_step: i64 = row.get(10)?;
-                    let error_msg: Option<String> = row.get(11)?;
-                    let result_sum: Option<String> = row.get(12)?;
-                    let origin_req: Option<String> = row.get(13)?;
-                    let trace_id: Option<String> = row.get(14)?;
-                    let parent_id_str: Option<String> = row.get(15)?;
-                    let max_steps: i64 = row.get(16)?;
-                    let max_dur: i64 = row.get(17)?;
-                    let retry_cnt: i64 = row.get(18)?;
-                    let max_ret: i64 = row.get(19)?;
-                    let meta_json: String = row.get(20)?;
+                    params![task_id_str],
+                    |row| {
+                        let id_str: String = row.get(0)?;
+                        let name: String = row.get(1)?;
+                        let description: String = row.get(2)?;
+                        let original_command: String = row.get(3)?;
+                        let state_str: String = row.get(4)?;
+                        let priority_val: i32 = row.get(5)?;
+                        let created_ms: i64 = row.get(6)?;
+                        let updated_ms: i64 = row.get(7)?;
+                        let started_ms: Option<i64> = row.get(8)?;
+                        let completed_ms: Option<i64> = row.get(9)?;
+                        let current_step: i64 = row.get(10)?;
+                        let error_msg: Option<String> = row.get(11)?;
+                        let result_sum: Option<String> = row.get(12)?;
+                        let origin_req: Option<String> = row.get(13)?;
+                        let trace_id: Option<String> = row.get(14)?;
+                        let parent_id_str: Option<String> = row.get(15)?;
+                        let max_steps: i64 = row.get(16)?;
+                        let max_dur: i64 = row.get(17)?;
+                        let retry_cnt: i64 = row.get(18)?;
+                        let max_ret: i64 = row.get(19)?;
+                        let meta_json: String = row.get(20)?;
 
-                    Ok((
-                        id_str, name, description, original_command, state_str, priority_val,
-                        created_ms, updated_ms, started_ms, completed_ms, current_step,
-                        error_msg, result_sum, origin_req, trace_id, parent_id_str,
-                        max_steps, max_dur, retry_cnt, max_ret, meta_json,
-                    ))
-                },
-            ).optional().map_err(|e| TaskError::Database(format!("Query task failed: {}", e)))?;
+                        Ok((
+                            id_str,
+                            name,
+                            description,
+                            original_command,
+                            state_str,
+                            priority_val,
+                            created_ms,
+                            updated_ms,
+                            started_ms,
+                            completed_ms,
+                            current_step,
+                            error_msg,
+                            result_sum,
+                            origin_req,
+                            trace_id,
+                            parent_id_str,
+                            max_steps,
+                            max_dur,
+                            retry_cnt,
+                            max_ret,
+                            meta_json,
+                        ))
+                    },
+                )
+                .optional()
+                .map_err(|e| TaskError::Database(format!("Query task failed: {}", e)))?;
 
             let (
-                id_str, name, description, original_command, state_str, priority_val,
-                created_ms, updated_ms, started_ms, completed_ms, current_step,
-                error_msg, result_sum, origin_req, trace_id, parent_id_str,
-                max_steps, max_dur, retry_cnt, max_ret, meta_json,
+                id_str,
+                name,
+                description,
+                original_command,
+                state_str,
+                priority_val,
+                created_ms,
+                updated_ms,
+                started_ms,
+                completed_ms,
+                current_step,
+                error_msg,
+                result_sum,
+                origin_req,
+                trace_id,
+                parent_id_str,
+                max_steps,
+                max_dur,
+                retry_cnt,
+                max_ret,
+                meta_json,
             ) = match row_res {
                 Some(data) => data,
                 None => return Ok(None),
@@ -380,39 +423,43 @@ impl TaskRepository for SqliteTaskRepository {
 
             let state = parse_task_state(&state_str);
             let priority = parse_task_priority(priority_val);
-            let metadata: HashMap<String, String> = serde_json::from_str(&meta_json)
-                .unwrap_or_default();
+            let metadata: HashMap<String, String> =
+                serde_json::from_str(&meta_json).unwrap_or_default();
 
             // Load associated steps
-            let mut stmt = guard.prepare(
-                "SELECT step_index, description, tool_name, arguments_json, result_json,
+            let mut stmt = guard
+                .prepare(
+                    "SELECT step_index, description, tool_name, arguments_json, result_json,
                         state, started_at_ms, completed_at_ms, error
                  FROM task_steps WHERE task_id = ?1 ORDER BY step_index ASC",
-            ).map_err(|e| TaskError::Database(e.to_string()))?;
+                )
+                .map_err(|e| TaskError::Database(e.to_string()))?;
 
-            let steps_iter = stmt.query_map(params![task_id_str], |row| {
-                let idx: i64 = row.get(0)?;
-                let desc: String = row.get(1)?;
-                let tool: Option<String> = row.get(2)?;
-                let args: Option<String> = row.get(3)?;
-                let res: Option<String> = row.get(4)?;
-                let state_s: String = row.get(5)?;
-                let start_m: Option<i64> = row.get(6)?;
-                let comp_m: Option<i64> = row.get(7)?;
-                let err: Option<String> = row.get(8)?;
+            let steps_iter = stmt
+                .query_map(params![task_id_str], |row| {
+                    let idx: i64 = row.get(0)?;
+                    let desc: String = row.get(1)?;
+                    let tool: Option<String> = row.get(2)?;
+                    let args: Option<String> = row.get(3)?;
+                    let res: Option<String> = row.get(4)?;
+                    let state_s: String = row.get(5)?;
+                    let start_m: Option<i64> = row.get(6)?;
+                    let comp_m: Option<i64> = row.get(7)?;
+                    let err: Option<String> = row.get(8)?;
 
-                Ok(TaskStep {
-                    index: idx as u32,
-                    description: desc,
-                    tool_name: tool,
-                    arguments_json: args,
-                    result_json: res,
-                    state: parse_step_state(&state_s),
-                    started_at: start_m.and_then(|m| DateTime::from_timestamp_millis(m)),
-                    completed_at: comp_m.and_then(|m| DateTime::from_timestamp_millis(m)),
-                    error: err,
+                    Ok(TaskStep {
+                        index: idx as u32,
+                        description: desc,
+                        tool_name: tool,
+                        arguments_json: args,
+                        result_json: res,
+                        state: parse_step_state(&state_s),
+                        started_at: start_m.and_then(|m| DateTime::from_timestamp_millis(m)),
+                        completed_at: comp_m.and_then(|m| DateTime::from_timestamp_millis(m)),
+                        error: err,
+                    })
                 })
-            }).map_err(|e| TaskError::Database(e.to_string()))?;
+                .map_err(|e| TaskError::Database(e.to_string()))?;
 
             let mut steps = Vec::new();
             for step_res in steps_iter {
@@ -459,7 +506,9 @@ impl TaskRepository for SqliteTaskRepository {
         let conn_arc = self.conn.clone();
 
         tokio::task::spawn_blocking(move || -> Result<bool, TaskError> {
-            let guard = conn_arc.lock().map_err(|_| TaskError::Database("Mutex poisoned".to_string()))?;
+            let guard = conn_arc
+                .lock()
+                .map_err(|_| TaskError::Database("Mutex poisoned".to_string()))?;
             let rows = guard
                 .execute("DELETE FROM tasks WHERE id = ?1", params![task_id_str])
                 .map_err(|e| TaskError::Database(e.to_string()))?;
@@ -473,7 +522,9 @@ impl TaskRepository for SqliteTaskRepository {
         let conn_arc = self.conn.clone();
 
         let task_ids = tokio::task::spawn_blocking(move || -> Result<Vec<TaskId>, TaskError> {
-            let guard = conn_arc.lock().map_err(|_| TaskError::Database("Mutex poisoned".to_string()))?;
+            let guard = conn_arc
+                .lock()
+                .map_err(|_| TaskError::Database("Mutex poisoned".to_string()))?;
             let mut stmt = guard
                 .prepare("SELECT id FROM tasks ORDER BY created_at_ms DESC")
                 .map_err(|e| TaskError::Database(e.to_string()))?;
@@ -512,7 +563,9 @@ impl TaskRepository for SqliteTaskRepository {
         let conn_arc = self.conn.clone();
 
         let task_ids = tokio::task::spawn_blocking(move || -> Result<Vec<TaskId>, TaskError> {
-            let guard = conn_arc.lock().map_err(|_| TaskError::Database("Mutex poisoned".to_string()))?;
+            let guard = conn_arc
+                .lock()
+                .map_err(|_| TaskError::Database("Mutex poisoned".to_string()))?;
             let mut stmt = guard
                 .prepare("SELECT id FROM tasks WHERE state = ?1 ORDER BY created_at_ms DESC")
                 .map_err(|e| TaskError::Database(e.to_string()))?;
@@ -600,7 +653,10 @@ impl TaskRepository for SqliteTaskRepository {
                 warn!(task_id = %task.id, "Reconciling task interrupted by process crash");
                 task.state = TaskState::Recovering;
                 task.updated_at = Utc::now();
-                task.error_message = Some("Task interrupted by ungraceful daemon termination. Awaiting recovery policy.".to_string());
+                task.error_message = Some(
+                    "Task interrupted by ungraceful daemon termination. Awaiting recovery policy."
+                        .to_string(),
+                );
                 self.save(task.clone()).await?;
                 reconciled.push(task);
             }
@@ -612,7 +668,9 @@ impl TaskRepository for SqliteTaskRepository {
     async fn count(&self) -> Result<usize, TaskError> {
         let conn_arc = self.conn.clone();
         tokio::task::spawn_blocking(move || -> Result<usize, TaskError> {
-            let guard = conn_arc.lock().map_err(|_| TaskError::Database("Mutex poisoned".to_string()))?;
+            let guard = conn_arc
+                .lock()
+                .map_err(|_| TaskError::Database("Mutex poisoned".to_string()))?;
             let count: i64 = guard
                 .query_row("SELECT COUNT(*) FROM tasks", [], |row| row.get(0))
                 .map_err(|e| TaskError::Database(e.to_string()))?;

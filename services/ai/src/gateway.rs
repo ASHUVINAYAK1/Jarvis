@@ -73,7 +73,11 @@ impl ModelGateway {
 
     /// Request structured JSON extraction conforming to a specified schema.
     #[instrument(skip(self, schema))]
-    pub async fn extract_json(&self, prompt: &str, schema: Option<Value>) -> Result<String, ModelError> {
+    pub async fn extract_json(
+        &self,
+        prompt: &str,
+        schema: Option<Value>,
+    ) -> Result<String, ModelError> {
         let mut request = ModelRequest::new()
             .with_category(ModelCategory::Fast)
             .with_message(ChatMessage::user(prompt));

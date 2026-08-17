@@ -330,7 +330,7 @@ pub struct MemoryInfo {
 pub fn current_os() -> OperatingSystem {
     #[cfg(target_os = "windows")]
     return OperatingSystem::Windows;
-    
+
     #[cfg(target_os = "linux")]
     return OperatingSystem::Linux;
 
@@ -378,7 +378,10 @@ mod tests {
     fn test_arch_detection() {
         let arch = current_arch();
         // On most CI systems and dev machines: X86_64
-        assert!(matches!(arch, Architecture::X86_64 | Architecture::Aarch64 | Architecture::X86));
+        assert!(matches!(
+            arch,
+            Architecture::X86_64 | Architecture::Aarch64 | Architecture::X86
+        ));
     }
 
     #[test]

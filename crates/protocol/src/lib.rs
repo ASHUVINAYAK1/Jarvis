@@ -16,9 +16,9 @@
 //!
 //! IMPLEMENTATION STATUS: Phase 2, Milestone M02.01 & M02.02
 
-use std::collections::HashMap;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -106,7 +106,12 @@ impl ResponseHeader {
         }
     }
 
-    pub fn error(request_id: impl Into<String>, status: ResponseStatus, err: impl Into<String>, duration_ms: u64) -> Self {
+    pub fn error(
+        request_id: impl Into<String>,
+        status: ResponseStatus,
+        err: impl Into<String>,
+        duration_ms: u64,
+    ) -> Self {
         Self {
             request_id: request_id.into(),
             status,
