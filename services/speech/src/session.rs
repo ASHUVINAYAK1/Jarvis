@@ -1,19 +1,21 @@
+//! Voice Session State Controller & Audio Pipeline Orchestration
+
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use tokio::sync::RwLock;
+use tracing::{info, instrument};
 
 use jarvis_ai::ModelGateway;
 use jarvis_event_bus::{EventBus, JarvisEvent, VoiceEvent};
-use tokio::sync::RwLock;
-use tracing::{info, instrument};
 
 use crate::output::AudioOutput;
 use crate::stt::{SpeechToText, WhisperSttEngine};
 use crate::tts::{MockTtsEngine, TextToSpeech};
-use crate::types::{AudioChunk, SpeechError, VoiceSessionState};
+use crate::types::{AudioChunk, AudioFormat, SpeechError, VoiceSessionState};
 use crate::vad::{VadState, VoiceActivityDetector};
 use crate::wakeword::WakeWordDetector;
 
-/// Controller managing the voice interaction pipeline.
+/// Central controller managing the state machine of a voice interaction session.
 pub struct VoiceSessionController {
     state: Arc<RwLock<VoiceSessionState>>,
     event_bus: Arc<EventBus>,
@@ -21,11 +23,10 @@ pub struct VoiceSessionController {
     stt_engine: Arc<dyn SpeechToText>,
     tts_engine: Arc<dyn TextToSpeech>,
     audio_output: Arc<AudioOutput>,
-    #[allow(dead_code)]
     wake_detector: Arc<RwLock<WakeWordDetector>>,
-    #[allow(dead_code)]
     vad: Arc<RwLock<VoiceActivityDetector>>,
-    #[allow(dead_code)]
+    speech_buffer: Arc<RwLock<Vec<f32>>>,
+    speech_format: Arc<RwLock<AudioFormat>>,
     is_running: Arc<AtomicBool>,
 }
 
@@ -40,6 +41,8 @@ impl VoiceSessionController {
             audio_output: Arc::new(AudioOutput::new()),
             wake_detector: Arc::new(RwLock::new(WakeWordDetector::default_jarvis())),
             vad: Arc::new(RwLock::new(VoiceActivityDetector::new())),
+            speech_buffer: Arc::new(RwLock::new(Vec::new())),
+            speech_format: Arc::new(RwLock::new(AudioFormat::default())),
             is_running: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -69,10 +72,10 @@ impl VoiceSessionController {
     async fn transition_state(&self, new_state: VoiceSessionState) {
         let mut guard = self.state.write().await;
         *guard = new_state;
-        info!(state = %new_state, "VoiceSessionState transition");
+        info!(new_state = %new_state, "VoiceSessionState transition");
     }
 
-    /// Process an incoming real-time audio chunk through continuous wake-word and VAD evaluation.
+    /// Process an incoming live PCM audio chunk from capture stream.
     pub async fn process_audio_chunk(&self, chunk: AudioChunk) {
         let current = self.current_state().await;
 
@@ -84,6 +87,14 @@ impl VoiceSessionController {
                 let _ = self.trigger_wake_word().await;
             }
         } else if current == VoiceSessionState::Listening {
+            // Store audio format and accumulate PCM samples in buffer
+            {
+                let mut fmt = self.speech_format.write().await;
+                *fmt = chunk.format.clone();
+                let mut buf = self.speech_buffer.write().await;
+                buf.extend_from_slice(&chunk.samples);
+            }
+
             let mut vad = self.vad.write().await;
             let vad_state = vad.process_chunk(&chunk);
 
@@ -95,17 +106,40 @@ impl VoiceSessionController {
             } else if vad_state == VadState::SpeechEnded {
                 vad.reset();
                 drop(vad);
+
+                // Drain complete accumulated speech buffer
+                let (collected_samples, format) = {
+                    let mut buf = self.speech_buffer.write().await;
+                    let samples = buf.drain(..).collect::<Vec<f32>>();
+                    let fmt = self.speech_format.read().await.clone();
+                    (samples, fmt)
+                };
+
                 let _ = self
                     .event_bus
                     .publish(JarvisEvent::Voice(VoiceEvent::SpeechEnded))
                     .await;
-                let _ = self.process_speech_utterance(chunk).await;
+
+                if !collected_samples.is_empty() {
+                    let full_utterance = AudioChunk {
+                        samples: collected_samples,
+                        format,
+                        timestamp_ms: chunk.timestamp_ms,
+                    };
+                    let _ = self.process_speech_utterance(full_utterance).await;
+                }
             }
         }
     }
 
     /// Trigger software wake word activation.
     pub async fn trigger_wake_word(&self) -> Result<(), SpeechError> {
+        // Clear speech buffer when starting listening session
+        {
+            let mut buf = self.speech_buffer.write().await;
+            buf.clear();
+        }
+
         self.transition_state(VoiceSessionState::WakeDetected).await;
         self.event_bus
             .publish(JarvisEvent::Voice(VoiceEvent::WakeWordDetected {
@@ -185,17 +219,13 @@ impl VoiceSessionController {
                         duration_ms: play_dur,
                     }))
                     .await;
-                self.transition_state(VoiceSessionState::Idle).await;
-                Ok(response_text)
-            }
-            Err(SpeechError::Interrupted) => {
-                self.interrupt().await;
-                Err(SpeechError::Interrupted)
             }
             Err(e) => {
-                self.transition_state(VoiceSessionState::Error).await;
-                Err(e)
+                info!(error = %e, "Audio playback error");
             }
         }
+
+        self.transition_state(VoiceSessionState::Idle).await;
+        Ok(response_text)
     }
 }

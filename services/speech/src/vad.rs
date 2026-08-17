@@ -25,9 +25,9 @@ pub struct VoiceActivityDetector {
 impl VoiceActivityDetector {
     pub fn new() -> Self {
         Self {
-            energy_threshold: 0.0035,
-            silence_duration_ms: 700, // 700ms silence ends utterance
-            min_speech_duration_ms: 300,
+            energy_threshold: 0.005,
+            silence_duration_ms: 1000,    // 1000ms silence required to end utterance
+            min_speech_duration_ms: 300,  // Require at least 300ms of vocal energy
             max_speech_duration_ms: 15000,
             current_speech_ms: 0,
             current_silence_ms: 0,
@@ -46,7 +46,7 @@ impl VoiceActivityDetector {
         self.is_speaking = false;
     }
 
-    /// Process a 100ms audio chunk and return the updated VAD state.
+    /// Process an audio chunk and return the updated VAD state.
     pub fn process_chunk(&mut self, chunk: &AudioChunk) -> VadState {
         let chunk_dur = chunk.duration_ms();
         let rms = chunk.rms_energy();
@@ -71,11 +71,17 @@ impl VoiceActivityDetector {
             }
         } else if self.is_speaking {
             self.current_silence_ms += chunk_dur;
-            self.current_speech_ms += chunk_dur;
 
+            // Only end speech if minimum speech duration has been met AND silence timeout reached
             if self.current_silence_ms >= self.silence_duration_ms {
-                self.is_speaking = false;
-                return VadState::SpeechEnded;
+                if self.current_speech_ms >= self.min_speech_duration_ms {
+                    self.is_speaking = false;
+                    return VadState::SpeechEnded;
+                } else {
+                    // Reset if speech was too brief (e.g. noise artifact)
+                    self.reset();
+                    return VadState::Silence;
+                }
             }
             return VadState::SpeechContinuing;
         }
