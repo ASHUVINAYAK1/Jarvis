@@ -1,0 +1,11 @@
+[package]
+name = "jarvis-event-bus"
+version.workspace = true
+edition.workspace = true
+
+# Internal publish/subscribe event bus for JARVIS services.
+# Phase 2, Milestone M02.05
+
+[dependencies]
+tokio = { workspace = true }
+tracing = { workspace = true }

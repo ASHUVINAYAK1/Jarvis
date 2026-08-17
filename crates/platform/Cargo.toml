@@ -1,0 +1,17 @@
+[package]
+name = "jarvis-platform"
+version.workspace = true
+edition.workspace = true
+
+# Platform abstraction trait definitions.
+# All platform-specific implementations must implement these traits.
+# Phase 6, Milestone M06.01
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+async-trait = { workspace = true }

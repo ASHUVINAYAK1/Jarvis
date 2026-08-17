@@ -1,0 +1,30 @@
+[package]
+name = "jarvis-desktop"
+version = "0.1.0"
+description = "JARVIS Desktop HUD Application"
+authors = ["JARVIS Project"]
+edition = "2021"
+
+[lib]
+name = "jarvis_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+tracing = { workspace = true }
+anyhow = "1"
+
+# JARVIS Core crates
+jarvis-orchestrator = { path = "../../../core/orchestrator" }
+jarvis-windows = { path = "../../../platforms/windows" }
+jarvis-logging = { path = "../../../crates/logging" }
+jarvis-platform = { path = "../../../crates/platform" }
+jarvis-speech = { path = "../../../services/speech" }
+jarvis-event-bus = { path = "../../../core/event-bus" }

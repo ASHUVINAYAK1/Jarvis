@@ -1,0 +1,28 @@
+[package]
+name = "jarvis-speech"
+version.workspace = true
+edition.workspace = true
+
+# Local Voice Pipeline service (STT, TTS, Wake Word, VAD, Audio I/O, Duplex Interruption)
+# Phase 5, Milestones M05.01 - M05.16
+
+[dependencies]
+tokio = { workspace = true, features = ["full", "sync", "time"] }
+tokio-stream = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+async-trait = { workspace = true }
+cpal = "0.15"
+
+# Workspace internal crate dependencies
+jarvis-event-bus = { path = "../../core/event-bus" }
+jarvis-ai = { path = "../ai" }
+
+[dev-dependencies]
+tokio = { workspace = true }

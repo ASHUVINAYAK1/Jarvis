@@ -1,0 +1,13 @@
+﻿[package]
+name = "jarvis-policy"
+version.workspace = true
+edition.workspace = true
+
+# Security policy and permission engine
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }

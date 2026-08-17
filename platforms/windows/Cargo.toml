@@ -1,0 +1,25 @@
+[package]
+name = "jarvis-windows"
+version.workspace = true
+edition.workspace = true
+
+# Windows platform adapter implementing PlatformAdapter for Windows 10/11.
+# Phase 6, Milestones M06.01 - M06.07
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+async-trait = { workspace = true }
+base64 = { version = "0.22" }
+hostname = { version = "0.4" }
+
+# Local dependency
+jarvis-platform = { path = "../../crates/platform" }
+
+[target.'cfg(windows)'.dependencies]
+# Windows-specific APIs (added as needed in later milestones)
+# windows = { version = "0.58", features = ["Win32_UI_WindowsAndMessaging", "Win32_System_Threading"] }

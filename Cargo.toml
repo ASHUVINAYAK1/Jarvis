@@ -1,0 +1,94 @@
+[workspace]
+resolver = "2"
+
+members = [
+    # Core daemon crates
+    "core/supervisor",
+    "core/orchestrator",
+    "core/event-bus",
+    "core/policy",
+    "core/task-engine",
+    "core/ipc",
+    "core/config",
+
+    # Shared library crates
+    "crates/protocol",
+    "crates/security",
+    "crates/logging",
+    "crates/platform",
+    "crates/filesystem",
+    "crates/ipc",
+
+    # Services
+    "services/speech",
+    "services/tools",
+    "services/mesh",
+    "services/ai",
+
+    # Platform adapters
+    "platforms/windows",
+    "platforms/linux",
+
+    # Desktop HUD app
+    "apps/desktop/src-tauri",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["JARVIS Project"]
+license = "TBD"
+repository = "https://github.com/your-org/jarvis"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7" }
+
+# gRPC / Protobuf
+tonic = { version = "0.12" }
+prost = { version = "0.13" }
+prost-types = { version = "0.13" }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1" }
+
+# Database
+sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio", "macros", "uuid"] }
+
+# HTTP client for local inference runtimes (Ollama, llama.cpp)
+reqwest = { version = "0.12", features = ["json", "stream"] }
+
+# UUID
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# Error handling
+anyhow = { version = "1" }
+thiserror = { version = "1" }
+
+# Logging / tracing
+tracing = { version = "0.1" }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Async traits
+async-trait = { version = "0.1" }
+
+# Config
+config = { version = "0.14" }
+
+# Channels / concurrency
+tokio-stream = { version = "0.1" }
+futures = { version = "0.3" }
+
+[profile.dev]
+opt-level = 0
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true

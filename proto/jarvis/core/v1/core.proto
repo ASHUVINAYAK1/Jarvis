@@ -1,0 +1,205 @@
+syntax = "proto3";
+
+package jarvis.core.v1;
+
+option java_package = "com.jarvis.core.v1";
+option java_outer_classname = "CoreProto";
+
+// ============================================================
+// Core Message Types for JARVIS Inter-Service Communication
+// 
+// IMPLEMENTATION STATUS: DRAFT
+// These are initial definitions. They will be refined in Phase 2.
+// ============================================================
+
+// Unique identifiers for JARVIS operations
+message RequestId {
+  string value = 1;  // UUID v4
+}
+
+message TaskId {
+  string value = 1;  // UUID v4
+}
+
+message TraceId {
+  string value = 1;  // UUID v4
+}
+
+// ============================================================
+// Request Header — included in every request
+// ============================================================
+message RequestHeader {
+  RequestId request_id = 1;
+  TaskId task_id = 2;
+  TraceId trace_id = 3;
+  int64 timestamp_ms = 4;
+  string source = 5;       // e.g., "control-center", "voice", "agent"
+  string destination = 6;  // e.g., "orchestrator", "ai", "tools"
+  uint32 protocol_version = 7;  // Current: 1
+  int64 deadline_ms = 8;   // Unix timestamp when this request expires
+}
+
+// ============================================================
+// Response Status
+// ============================================================
+enum ResponseStatus {
+  RESPONSE_STATUS_UNSPECIFIED = 0;
+  RESPONSE_STATUS_OK = 1;
+  RESPONSE_STATUS_ERROR = 2;
+  RESPONSE_STATUS_CANCELLED = 3;
+  RESPONSE_STATUS_TIMEOUT = 4;
+  RESPONSE_STATUS_PERMISSION_DENIED = 5;
+  RESPONSE_STATUS_NOT_FOUND = 6;
+  RESPONSE_STATUS_INVALID_ARGUMENT = 7;
+}
+
+message ResponseHeader {
+  RequestId request_id = 1;
+  ResponseStatus status = 2;
+  string error_message = 3;
+  int64 duration_ms = 4;
+}
+
+// ============================================================
+// Command — sent from UI/voice to orchestrator
+// ============================================================
+message Command {
+  RequestHeader header = 1;
+  string text = 2;              // The user's command text
+  CommandSource source = 3;
+  string language_code = 4;    // e.g., "en-US"
+}
+
+enum CommandSource {
+  COMMAND_SOURCE_UNSPECIFIED = 0;
+  COMMAND_SOURCE_VOICE = 1;
+  COMMAND_SOURCE_TEXT = 2;
+  COMMAND_SOURCE_API = 3;
+  COMMAND_SOURCE_SCHEDULED = 4;
+}
+
+// ============================================================
+// Task State
+// ============================================================
+enum TaskState {
+  TASK_STATE_UNSPECIFIED = 0;
+  TASK_STATE_PENDING = 1;
+  TASK_STATE_RUNNING = 2;
+  TASK_STATE_PAUSED = 3;           // Waiting for user input
+  TASK_STATE_AWAITING_APPROVAL = 4;
+  TASK_STATE_COMPLETED = 5;
+  TASK_STATE_FAILED = 6;
+  TASK_STATE_CANCELLED = 7;
+  TASK_STATE_RECOVERING = 8;
+}
+
+message Task {
+  TaskId id = 1;
+  string name = 2;
+  string description = 3;
+  TaskState state = 4;
+  int64 created_at_ms = 5;
+  int64 updated_at_ms = 6;
+  int64 started_at_ms = 7;
+  int64 completed_at_ms = 8;
+  uint32 step_count = 9;
+  uint32 current_step = 10;
+  string error_message = 11;
+  map<string, string> metadata = 12;
+}
+
+// ============================================================
+// Tool Call / Result
+// ============================================================
+message ToolCall {
+  RequestHeader header = 1;
+  string tool_name = 2;
+  string tool_version = 3;
+  string arguments_json = 4;  // JSON-encoded arguments (validated against schema)
+  string invoked_by = 5;      // "agent", "planner", "user"
+}
+
+message ToolResult {
+  ResponseHeader header = 1;
+  string tool_name = 2;
+  string result_json = 3;     // JSON-encoded result
+  bool success = 4;
+  string error = 5;
+  int64 duration_ms = 6;
+}
+
+// ============================================================
+// Permission / Approval
+// ============================================================
+enum PermissionLevel {
+  PERMISSION_LEVEL_UNSPECIFIED = 0;
+  PERMISSION_LEVEL_ALLOWED = 1;     // Always allowed
+  PERMISSION_LEVEL_ASK = 2;         // Ask user before executing
+  PERMISSION_LEVEL_BLOCKED = 3;     // Never allowed
+}
+
+message PermissionRequest {
+  RequestHeader header = 1;
+  string action = 2;           // e.g., "open_application", "delete_file"
+  string resource = 3;         // e.g., "/home/user/Documents", "chrome"
+  string rationale = 4;        // Why is this permission needed?
+  PermissionLevel suggested_level = 5;
+}
+
+message PermissionResponse {
+  ResponseHeader header = 1;
+  bool granted = 2;
+  string user_note = 3;
+}
+
+// ============================================================
+// Events (emitted asynchronously)
+// ============================================================
+enum EventType {
+  EVENT_TYPE_UNSPECIFIED = 0;
+  EVENT_TYPE_TASK_STARTED = 1;
+  EVENT_TYPE_TASK_COMPLETED = 2;
+  EVENT_TYPE_TASK_FAILED = 3;
+  EVENT_TYPE_TASK_CANCELLED = 4;
+  EVENT_TYPE_TASK_PAUSED = 5;
+  EVENT_TYPE_TOOL_STARTED = 6;
+  EVENT_TYPE_TOOL_COMPLETED = 7;
+  EVENT_TYPE_TOOL_FAILED = 8;
+  EVENT_TYPE_APPROVAL_REQUESTED = 9;
+  EVENT_TYPE_APPROVAL_GRANTED = 10;
+  EVENT_TYPE_APPROVAL_DENIED = 11;
+  EVENT_TYPE_SERVICE_HEALTH_CHANGED = 12;
+  EVENT_TYPE_VOICE_ACTIVATED = 13;
+  EVENT_TYPE_VOICE_TRANSCRIBED = 14;
+  EVENT_TYPE_RESPONSE_READY = 15;
+}
+
+message Event {
+  TraceId trace_id = 1;
+  TaskId task_id = 2;
+  EventType type = 3;
+  int64 timestamp_ms = 4;
+  string payload_json = 5;   // Event-specific payload
+  string source_service = 6;
+}
+
+// ============================================================
+// Health
+// ============================================================
+enum ServiceHealth {
+  SERVICE_HEALTH_UNSPECIFIED = 0;
+  SERVICE_HEALTH_STARTING = 1;
+  SERVICE_HEALTH_READY = 2;
+  SERVICE_HEALTH_DEGRADED = 3;
+  SERVICE_HEALTH_FAILED = 4;
+  SERVICE_HEALTH_STOPPING = 5;
+  SERVICE_HEALTH_STOPPED = 6;
+}
+
+message HealthStatus {
+  string service_name = 1;
+  ServiceHealth health = 2;
+  string message = 3;
+  int64 last_updated_ms = 4;
+  map<string, string> details = 5;
+}

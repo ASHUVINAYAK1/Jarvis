@@ -1,0 +1,22 @@
+[package]
+name = "jarvis-tools"
+version.workspace = true
+edition.workspace = true
+
+# Tool runtime and registry for JARVIS actions
+# Phase 7 / Vertical Slice 1
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+async-trait = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+
+# Workspace crates
+jarvis-platform = { path = "../../crates/platform" }
+jarvis-policy = { path = "../../core/policy" }

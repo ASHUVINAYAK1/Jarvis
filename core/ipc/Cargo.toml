@@ -1,0 +1,25 @@
+[package]
+name = "jarvis-core-ipc"
+version.workspace = true
+edition.workspace = true
+
+# IPC service layer for JARVIS Core daemon
+# Phase 2 / Doc 22
+
+[dependencies]
+tokio = { workspace = true, features = ["full", "sync", "time"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+async-trait = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+
+# Workspace dependencies
+jarvis-protocol = { path = "../../crates/protocol" }
+jarvis-ipc = { path = "../../crates/ipc" }
+jarvis-orchestrator = { path = "../orchestrator" }
+jarvis-event-bus = { path = "../event-bus" }
+jarvis-platform = { path = "../../crates/platform" }

@@ -1,0 +1,26 @@
+[package]
+name = "jarvis-ai"
+version.workspace = true
+edition.workspace = true
+
+# Local AI Model Gateway and Provider abstraction for JARVIS.
+# Supports Ollama, llama.cpp, model routing, fallback, streaming,
+# structured output, and hardware-aware selection.
+# Phase 4, Milestones M04.01 - M04.13
+
+[dependencies]
+tokio = { workspace = true, features = ["full", "sync", "time"] }
+tokio-stream = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+async-trait = { workspace = true }
+reqwest = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }

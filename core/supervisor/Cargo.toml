@@ -1,0 +1,18 @@
+[package]
+name = "jarvis-supervisor"
+version.workspace = true
+edition.workspace = true
+
+# Process supervisor for all JARVIS services.
+# Phase 3, Milestone M03.01 + M03.02
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.29", features = ["signal", "process"] }

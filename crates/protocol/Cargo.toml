@@ -1,0 +1,17 @@
+[package]
+name = "jarvis-protocol"
+version.workspace = true
+edition.workspace = true
+
+# Shared protobuf types, wire envelopes, and protocol definitions for JARVIS
+# Phase 2 / Doc 22
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }

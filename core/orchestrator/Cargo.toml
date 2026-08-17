@@ -1,0 +1,31 @@
+[package]
+name = "jarvis-orchestrator"
+version.workspace = true
+edition.workspace = true
+
+# Core request and task orchestrator for JARVIS
+# Ties TaskEngine + PolicyEngine + ToolRuntime + PlatformAdapter + EventBus
+
+[[bin]]
+name = "jarvis"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+async-trait = { workspace = true }
+
+# Workspace dependencies
+jarvis-task-engine = { path = "../task-engine" }
+jarvis-policy = { path = "../policy" }
+jarvis-event-bus = { path = "../event-bus" }
+jarvis-platform = { path = "../../crates/platform" }
+jarvis-tools = { path = "../../services/tools" }
+jarvis-windows = { path = "../../platforms/windows" }
+jarvis-logging = { path = "../../crates/logging" }

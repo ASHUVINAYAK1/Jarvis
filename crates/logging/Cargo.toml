@@ -1,0 +1,11 @@
+[package]
+name = "jarvis-logging"
+version.workspace = true
+edition.workspace = true
+
+# Structured logging setup for all JARVIS services.
+# Uses tracing + tracing-subscriber.
+
+[dependencies]
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
