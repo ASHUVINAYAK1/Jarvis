@@ -78,8 +78,11 @@ export const Hud: React.FC = () => {
         }).then((u) => unlistens.push(u));
 
         listen<string>("jarvis-transcribed", (event) => {
-          setTranscript(event.payload || "");
-          setState("PROCESSING");
+          const text = event.payload || "";
+          setTranscript(text);
+          if (text) {
+            executeCommand(text);
+          }
         }).then((u) => unlistens.push(u));
 
         listen<string>("jarvis-speaking", (event) => {
