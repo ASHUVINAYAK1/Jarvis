@@ -141,7 +141,7 @@ impl Orchestrator {
         }
 
         // 2. Active window detection commands
-        if text == "get_active_window"
+        if (text == "get_active_window"
             || text == "what window is active?"
             || text == "what window is active"
             || text == "which window is currently active?"
@@ -149,7 +149,8 @@ impl Orchestrator {
             || text.contains("active window")
             || text.contains("current window")
             || text.contains("what window am i using")
-            || text.contains("what window am i currently using")
+            || text.contains("what window am i currently using"))
+            && !text.starts_with("inspect")
         {
             return Ok(ParsedIntent {
                 tool_name: "get_active_window".to_string(),
@@ -161,7 +162,7 @@ impl Orchestrator {
         // 3. Focus window commands
         if text.starts_with("focus_window ")
             || text.starts_with("focus ")
-            || text.starts_with("switch to ")
+            || (text.starts_with("switch to ") && !text.contains("tab"))
             || text.starts_with("bring ")
         {
             let target = text
@@ -387,6 +388,253 @@ impl Orchestrator {
                 arguments: json!({}),
                 raw_command: command.to_string(),
             });
+        }
+
+        // 12.5 Browser Status & Navigation requests (M09.01)
+        {
+            let lower = command.to_lowercase();
+
+            // Browser status requests ("is chrome open", "browser status", "check chrome")
+            // 12.5 Browser Navigation & Tab Control requests
+            let is_browser_status = clean_text == "browser_status"
+                || clean_text == "browser status"
+                || clean_text == "check browser status"
+                || clean_text == "is chrome open"
+                || clean_text == "is chrome open?"
+                || clean_text == "is chrome running"
+                || clean_text == "is chrome running?"
+                || clean_text == "is google chrome open"
+                || clean_text == "is google chrome open?"
+                || clean_text == "check chrome"
+                || clean_text == "is browser open"
+                || clean_text == "is browser running";
+
+            if is_browser_status {
+                let browser = if clean_text.contains("edge") {
+                    "Edge"
+                } else if clean_text.contains("firefox") {
+                    "Firefox"
+                } else if clean_text.contains("brave") {
+                    "Brave"
+                } else {
+                    "Chrome"
+                };
+
+                return Ok(ParsedIntent {
+                    tool_name: "browser_status".to_string(),
+                    arguments: json!({ "browser": browser }),
+                    raw_command: command.to_string(),
+                });
+            }
+
+            // Browser Back ("go back", "back", "browser back", "page back")
+            if clean_text == "go back"
+                || clean_text == "back"
+                || clean_text == "browser back"
+                || clean_text == "page back"
+                || clean_text == "navigate back"
+            {
+                return Ok(ParsedIntent {
+                    tool_name: "browser_back".to_string(),
+                    arguments: json!({ "browser": "Chrome" }),
+                    raw_command: command.to_string(),
+                });
+            }
+
+            // Browser Forward ("go forward", "forward", "browser forward", "page forward")
+            if clean_text == "go forward"
+                || clean_text == "forward"
+                || clean_text == "browser forward"
+                || clean_text == "page forward"
+                || clean_text == "navigate forward"
+            {
+                return Ok(ParsedIntent {
+                    tool_name: "browser_forward".to_string(),
+                    arguments: json!({ "browser": "Chrome" }),
+                    raw_command: command.to_string(),
+                });
+            }
+
+            // Browser Reload ("reload the page", "refresh the page", "reload chrome", "refresh chrome", "reload page", "refresh page")
+            if clean_text == "reload the page"
+                || clean_text == "refresh the page"
+                || clean_text == "reload page"
+                || clean_text == "refresh page"
+                || clean_text == "reload chrome"
+                || clean_text == "refresh chrome"
+                || clean_text == "reload"
+                || clean_text == "refresh"
+            {
+                return Ok(ParsedIntent {
+                    tool_name: "browser_reload".to_string(),
+                    arguments: json!({ "browser": "Chrome" }),
+                    raw_command: command.to_string(),
+                });
+            }
+
+            // Browser Current Page ("what page am i on", "what is the current url", "what is the page title", "current page", "current url")
+            if clean_text == "what page am i on"
+                || clean_text == "what page am i on?"
+                || clean_text == "what is the current url"
+                || clean_text == "what is the current url?"
+                || clean_text == "what is the page title"
+                || clean_text == "what is the page title?"
+                || clean_text == "current page"
+                || clean_text == "current url"
+                || clean_text == "where am i"
+            {
+                return Ok(ParsedIntent {
+                    tool_name: "browser_current_page".to_string(),
+                    arguments: json!({ "browser": "Chrome" }),
+                    raw_command: command.to_string(),
+                });
+            }
+
+            // Browser List Tabs ("show my tabs", "list my tabs", "what tabs are open", "list tabs", "show tabs")
+            if clean_text == "show my tabs"
+                || clean_text == "list my tabs"
+                || clean_text == "what tabs are open"
+                || clean_text == "what tabs are open?"
+                || clean_text == "list tabs"
+                || clean_text == "show tabs"
+                || clean_text == "my tabs"
+            {
+                return Ok(ParsedIntent {
+                    tool_name: "browser_list_tabs".to_string(),
+                    arguments: json!({ "browser": "Chrome" }),
+                    raw_command: command.to_string(),
+                });
+            }
+
+            // Browser New Tab ("open a new tab", "create a new tab", "new tab", "open new tab")
+            if clean_text == "open a new tab"
+                || clean_text == "create a new tab"
+                || clean_text == "new tab"
+                || clean_text == "open new tab"
+            {
+                return Ok(ParsedIntent {
+                    tool_name: "browser_new_tab".to_string(),
+                    arguments: json!({ "browser": "Chrome" }),
+                    raw_command: command.to_string(),
+                });
+            }
+
+            // Browser Switch Tab ("switch to tab 1", "switch to tab 2", "switch to tab google", etc.)
+            if clean_text.starts_with("switch to tab ")
+                || clean_text.starts_with("switch to the ")
+                || clean_text.starts_with("switch tab ")
+                || clean_text.starts_with("select tab ")
+            {
+                let rest = if clean_text.starts_with("switch to tab ") {
+                    clean_text.trim_start_matches("switch to tab ")
+                } else if clean_text.starts_with("switch to the ") {
+                    clean_text.trim_start_matches("switch to the ").trim_end_matches(" tab")
+                } else if clean_text.starts_with("switch tab ") {
+                    clean_text.trim_start_matches("switch tab ")
+                } else {
+                    clean_text.trim_start_matches("select tab ")
+                }.trim();
+
+                // Convert word numbers (one, two, 1, 2)
+                let tab_idx = match rest {
+                    "1" | "one" | "first" => Some(1),
+                    "2" | "two" | "second" => Some(2),
+                    "3" | "three" | "third" => Some(3),
+                    "4" | "four" | "fourth" => Some(4),
+                    "5" | "five" | "fifth" => Some(5),
+                    "6" | "six" | "sixth" => Some(6),
+                    "7" | "seven" | "seventh" => Some(7),
+                    "8" | "eight" | "eighth" => Some(8),
+                    "9" | "nine" | "ninth" => Some(9),
+                    _ => rest.parse::<u64>().ok(),
+                };
+
+                let args = if let Some(idx) = tab_idx {
+                    json!({ "tab_index": idx, "browser": "Chrome" })
+                } else {
+                    json!({ "title": rest, "browser": "Chrome" })
+                };
+
+                return Ok(ParsedIntent {
+                    tool_name: "browser_switch_tab".to_string(),
+                    arguments: args,
+                    raw_command: command.to_string(),
+                });
+            }
+
+            // Browser Close Tab ("close this tab", "close current tab", "close the current tab", "close tab")
+            if clean_text == "close this tab"
+                || clean_text == "close current tab"
+                || clean_text == "close the current tab"
+                || clean_text == "close tab"
+            {
+                return Ok(ParsedIntent {
+                    tool_name: "browser_close_tab".to_string(),
+                    arguments: json!({ "browser": "Chrome" }),
+                    raw_command: command.to_string(),
+                });
+            }
+
+            // Browser navigation requests ("go to <URL>", "navigate to <URL>")
+            if lower.starts_with("go to ")
+                || lower.starts_with("navigate to ")
+                || lower.starts_with("browser_navigate ")
+                || lower.starts_with("browser navigate ")
+            {
+                let raw_url = if let Some(rest) = lower.strip_prefix("go to ") {
+                    rest
+                } else if let Some(rest) = lower.strip_prefix("navigate to ") {
+                    rest
+                } else if let Some(rest) = lower.strip_prefix("browser_navigate ") {
+                    rest
+                } else if let Some(rest) = lower.strip_prefix("browser navigate ") {
+                    rest
+                } else {
+                    ""
+                };
+
+                let target_url = raw_url.trim().trim_end_matches(['.', '!', '?']).trim();
+
+                if !target_url.is_empty() {
+                    return Ok(ParsedIntent {
+                        tool_name: "browser_navigate".to_string(),
+                        arguments: json!({ "url": target_url, "browser": "Chrome" }),
+                        raw_command: command.to_string(),
+                    });
+                }
+            }
+
+            // Open browser requests ("open chrome", "launch chrome", "start chrome", "open browser")
+            let is_open_browser = clean_text == "open_browser"
+                || clean_text == "open browser"
+                || clean_text == "launch browser"
+                || clean_text == "open chrome"
+                || clean_text == "launch chrome"
+                || clean_text == "start chrome"
+                || clean_text == "open google chrome"
+                || clean_text == "launch google chrome"
+                || clean_text == "start google chrome"
+                || clean_text == "open edge"
+                || clean_text == "open firefox"
+                || clean_text == "open brave";
+
+            if is_open_browser {
+                let browser = if clean_text.contains("edge") {
+                    "Edge"
+                } else if clean_text.contains("firefox") {
+                    "Firefox"
+                } else if clean_text.contains("brave") {
+                    "Brave"
+                } else {
+                    "Chrome"
+                };
+
+                return Ok(ParsedIntent {
+                    tool_name: "open_browser".to_string(),
+                    arguments: json!({ "browser": browser }),
+                    raw_command: command.to_string(),
+                });
+            }
         }
 
         // 13. Process Management: Close / Kill Application
@@ -715,7 +963,238 @@ impl Orchestrator {
             }
         }
 
-        // 18. Time query
+        // 18a. Vision Screen Element Detection — detect_screen_elements
+        {
+            let lower = command.to_lowercase();
+            let is_detect = (clean_text == "detect_screen_elements"
+                || clean_text == "detect screen elements"
+                || clean_text == "find elements on screen"
+                || clean_text == "find elements on my screen"
+                || clean_text == "what elements are on my screen"
+                || clean_text == "what elements are visible"
+                || clean_text == "what buttons are on my screen"
+                || clean_text == "what buttons are visible"
+                || clean_text == "what can i click"
+                || clean_text == "what can i interact with"
+                || lower.starts_with("find the ")
+                || lower.starts_with("find a ")
+                || lower.starts_with("find an ")
+                || lower.starts_with("locate the ")
+                || lower.starts_with("locate a ")
+                || lower.starts_with("where is the ")
+                || lower.starts_with("where is "))
+                && !lower.contains("soft reset")
+                && !lower.starts_with("inspect");
+
+            if is_detect {
+                let query_text = command
+                    .trim_start_matches(|c: char| !c.is_alphabetic())
+                    .to_string();
+
+                let element_query = {
+                    let lower_q = query_text.to_lowercase();
+                    let stripped = if let Some(rest) = lower_q.strip_prefix("find the ") {
+                        rest.to_string()
+                    } else if let Some(rest) = lower_q.strip_prefix("find a ") {
+                        rest.to_string()
+                    } else if let Some(rest) = lower_q.strip_prefix("find an ") {
+                        rest.to_string()
+                    } else if let Some(rest) = lower_q.strip_prefix("locate the ") {
+                        rest.to_string()
+                    } else if let Some(rest) = lower_q.strip_prefix("locate a ") {
+                        rest.to_string()
+                    } else if let Some(rest) = lower_q.strip_prefix("where is the ") {
+                        rest.to_string()
+                    } else if let Some(rest) = lower_q.strip_prefix("where is ") {
+                        rest.to_string()
+                    } else {
+                        String::new()
+                    };
+                    let cleaned = stripped
+                        .trim_end_matches(|c: char| c == '?' || c == '.' || c == '!')
+                        .trim()
+                        .to_string();
+                    if cleaned.is_empty() { None } else { Some(cleaned) }
+                };
+
+                return Ok(ParsedIntent {
+                    tool_name: "detect_screen_elements".to_string(),
+                    arguments: match element_query {
+                        Some(q) => json!({ "query": q }),
+                        None => json!({}),
+                    },
+                    raw_command: command.to_string(),
+                });
+            }
+        }
+
+        // 18b. Windows UI Automation Inspection — inspect_ui_tree (M08.04)
+        {
+            let lower = command.to_lowercase();
+            let is_uia = clean_text == "inspect_ui_tree"
+                || clean_text == "inspect ui tree"
+                || clean_text == "inspect the ui"
+                || clean_text == "inspect ui"
+                || clean_text == "inspect active window"
+                || clean_text == "inspect the current window"
+                || clean_text == "inspect current window"
+                || clean_text == "inspect active application"
+                || clean_text == "inspect window elements"
+                || lower.starts_with("inspect ")
+                || lower.contains("soft reset");
+
+            if is_uia {
+                let query_text = command
+                    .trim_start_matches(|c: char| !c.is_alphabetic())
+                    .to_string();
+
+                let element_query = {
+                    let lower_q = query_text.to_lowercase();
+                    let stripped = if let Some(rest) = lower_q.strip_prefix("inspect the ui for ") {
+                        rest.to_string()
+                    } else if let Some(rest) = lower_q.strip_prefix("inspect ui for ") {
+                        rest.to_string()
+                    } else if let Some(rest) = lower_q.strip_prefix("inspect ") {
+                        rest.to_string()
+                    } else if let Some(rest) = lower_q.strip_prefix("find the ") {
+                        rest.to_string()
+                    } else if let Some(rest) = lower_q.strip_prefix("find a ") {
+                        rest.to_string()
+                    } else if let Some(rest) = lower_q.strip_prefix("find an ") {
+                        rest.to_string()
+                    } else if let Some(rest) = lower_q.strip_prefix("find ") {
+                        rest.to_string()
+                    } else if let Some(rest) = lower_q.strip_prefix("locate the ") {
+                        rest.to_string()
+                    } else if let Some(rest) = lower_q.strip_prefix("locate a ") {
+                        rest.to_string()
+                    } else if let Some(rest) = lower_q.strip_prefix("locate ") {
+                        rest.to_string()
+                    } else if let Some(rest) = lower_q.strip_prefix("where is the ") {
+                        rest.to_string()
+                    } else if let Some(rest) = lower_q.strip_prefix("where is ") {
+                        rest.to_string()
+                    } else {
+                        String::new()
+                    };
+                    let cleaned = stripped
+                        .trim_end_matches(|c: char| c == '?' || c == '.' || c == '!')
+                        .trim()
+                        .to_string();
+                    if cleaned.is_empty() || cleaned == "the ui" || cleaned == "ui" || cleaned == "tree" || cleaned == "ui tree" {
+                        None
+                    } else {
+                        Some(cleaned)
+                    }
+                };
+
+                return Ok(ParsedIntent {
+                    tool_name: "inspect_ui_tree".to_string(),
+                    arguments: match element_query {
+                        Some(q) => json!({ "query": q }),
+                        None => json!({}),
+                    },
+                    raw_command: command.to_string(),
+                });
+            }
+        }
+
+        // 19. Screen description & vision analysis requests
+        if clean_text == "describe_screen"
+            || clean_text == "describe my screen"
+            || clean_text == "describe the screen"
+            || clean_text == "describe screen"
+            || clean_text == "what is on my screen"
+            || clean_text == "what's on my screen"
+            || clean_text == "what is visible on my screen"
+            || clean_text == "what's visible on my screen"
+            || clean_text == "what do you see"
+            || clean_text == "what do you see on my screen"
+            || clean_text == "look at my screen"
+            || clean_text == "analyze my screen"
+            || clean_text == "analyze screen"
+            || clean_text == "describe my current screen"
+            || clean_text.starts_with("describe my screen")
+            || clean_text.starts_with("describe the screen")
+            || clean_text.starts_with("what is on my screen")
+            || clean_text.starts_with("what's on my screen")
+            || clean_text.starts_with("what is visible on my screen")
+            || clean_text.starts_with("what's visible on my screen")
+            || clean_text.starts_with("what application is visible")
+            || clean_text.starts_with("what application is open")
+        {
+            let prompt = if clean_text == "describe my screen"
+                || clean_text == "describe the screen"
+                || clean_text == "describe screen"
+                || clean_text == "what is on my screen"
+                || clean_text == "what's on my screen"
+                || clean_text == "what do you see"
+                || clean_text == "look at my screen"
+                || clean_text == "analyze my screen"
+                || clean_text == "describe_screen"
+            {
+                "Describe what is visible on the screen.".to_string()
+            } else {
+                command.trim().to_string()
+            };
+
+            return Ok(ParsedIntent {
+                tool_name: "describe_screen".to_string(),
+                arguments: json!({ "prompt": prompt }),
+                raw_command: command.to_string(),
+            });
+        }
+
+        // 19. OCR / Text extraction requests — route to canonical "read_screen" tool
+        // These MUST route to read_screen, NOT describe_screen.
+        // Keep read_screen_text as backward-compatible alias.
+        let lower_cmd = command.to_lowercase();
+        let is_ocr = clean_text == "read_screen"
+            || clean_text == "read_screen_text"
+            || clean_text == "read my screen"
+            || clean_text == "read the screen"
+            || clean_text == "read screen"
+            || clean_text == "read screen text"
+            || clean_text == "read the text on my screen"
+            || clean_text == "read text on my screen"
+            || clean_text == "read what's on my screen"
+            || clean_text == "read what is on my screen"
+            || clean_text == "read whats on my screen"
+            || clean_text == "read everything on the screen"
+            || clean_text == "what text is visible on my screen"
+            || clean_text == "what text is on my screen"
+            || clean_text == "what text is visible on screen"
+            || clean_text == "what text is on screen"
+            || clean_text == "what does the screen say"
+            || clean_text == "what does this screen say"
+            || clean_text == "what does my screen say"
+            || clean_text == "extract the text from my screen"
+            || clean_text == "extract text from screen"
+            || clean_text == "can you read my screen"
+            || clean_text == "tell me what is written on my screen"
+            || clean_text == "tell me what text is on my screen"
+            || clean_text == "what is written on my screen"
+            || lower_cmd.contains("read the text on my screen")
+            || lower_cmd.contains("read text on my screen")
+            || lower_cmd.contains("what text is visible")
+            || lower_cmd.contains("what text is on my screen")
+            || lower_cmd.contains("extract the text from my screen")
+            || lower_cmd.contains("what does the screen say")
+            || lower_cmd.contains("what does this screen say")
+            || lower_cmd.contains("what does my screen say")
+            || lower_cmd.contains("written on my screen")
+            || lower_cmd.contains("read everything on the screen")
+            || (lower_cmd.contains("read") && lower_cmd.contains("screen") && !lower_cmd.contains("describe"));
+
+        if is_ocr {
+            return Ok(ParsedIntent {
+                tool_name: "read_screen".to_string(),
+                arguments: json!({}),
+                raw_command: command.to_string(),
+            });
+        }
+
+        // 20. Time query
         if text.contains("time") || text.contains("what time") || text.contains("clock") {
             return Ok(ParsedIntent {
                 tool_name: "get_time".to_string(),
@@ -724,7 +1203,7 @@ impl Orchestrator {
             });
         }
 
-        // 19. Controlled failure for unknown intent (NO automatic fallthrough to open_application!)
+        // 21. Controlled failure for unknown intent (NO automatic fallthrough to open_application!)
         Err(anyhow!("Could not determine intent for command: '{}'", command))
     }
 
@@ -1038,6 +1517,220 @@ impl Orchestrator {
             "show_notification" => {
                 "Notification displayed, sir.".to_string()
             }
+            "describe_screen" => {
+                let desc = result
+                    .data
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Screen description unavailable.");
+                desc.to_string()
+            }
+            "detect_screen_elements" => {
+                let limitation = result
+                    .data
+                    .get("detection_limitation")
+                    .and_then(|v| v.as_str());
+
+                let element_count = result
+                    .data
+                    .get("element_count")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+
+                if let Some(lim) = limitation {
+                    format!(
+                        "I could not reliably determine pixel coordinates for the screen elements. {}",
+                        lim
+                    )
+                } else if element_count == 0 {
+                    "I did not detect any elements on the current screen.".to_string()
+                } else {
+                    // Build a label list from the elements array
+                    let labels: Vec<String> = result
+                        .data
+                        .get("elements")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|e| {
+                                    e.get("label")
+                                        .and_then(|l| l.as_str())
+                                        .filter(|s| !s.is_empty())
+                                        .map(|s| s.to_string())
+                                        .or_else(|| {
+                                            e.get("type")
+                                                .and_then(|t| t.as_str())
+                                                .map(|t| t.to_string())
+                                        })
+                                })
+                                .take(5)
+                                .collect()
+                        })
+                        .unwrap_or_default();
+
+                    if labels.is_empty() {
+                        format!("I detected {} UI element{} on the current screen.", element_count,
+                            if element_count == 1 { "" } else { "s" })
+                    } else {
+                        format!(
+                            "I detected {} UI element{} on the screen: {}.",
+                            element_count,
+                            if element_count == 1 { "" } else { "s" },
+                            labels.join(", ")
+                        )
+                    }
+                }
+            }
+            "inspect_ui_tree" => {
+                let win_title = result
+                    .data
+                    .get("window")
+                    .and_then(|w| w.get("title"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Active Window");
+
+                let element_count = result
+                    .data
+                    .get("element_count")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+
+                if element_count == 0 {
+                    format!("I inspected the UI tree of '{}' but found no matching elements, sir.", win_title)
+                } else {
+                    let labels: Vec<String> = result
+                        .data
+                        .get("elements")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|e| {
+                                    let name = e.get("name").and_then(|n| n.as_str()).unwrap_or("");
+                                    let ctype = e.get("control_type").and_then(|t| t.as_str()).unwrap_or("Element");
+                                    if !name.is_empty() {
+                                        Some(format!("{} ({})", name, ctype))
+                                    } else {
+                                        Some(ctype.to_string())
+                                    }
+                                })
+                                .take(5)
+                                .collect()
+                        })
+                        .unwrap_or_default();
+
+                    if labels.is_empty() {
+                        format!("I inspected '{}' via Windows UI Automation and found {} UI element{}, sir.",
+                            win_title, element_count, if element_count == 1 { "" } else { "s" })
+                    } else {
+                        format!(
+                            "I inspected '{}' via Windows UI Automation and found {} UI element{}: {}.",
+                            win_title,
+                            element_count,
+                            if element_count == 1 { "" } else { "s" },
+                            labels.join(", ")
+                        )
+                    }
+                }
+            }
+            "browser_status" => {
+                let browser = result.data.get("browser").and_then(|v| v.as_str()).unwrap_or("Chrome");
+                let running = result.data.get("running").and_then(|v| v.as_bool()).unwrap_or(false);
+                let title = result.data.get("window_title").and_then(|v| v.as_str());
+
+                if running {
+                    if let Some(t) = title {
+                        format!("{} is currently running with active window '{}', sir.", browser, t)
+                    } else {
+                        format!("Yes, {} is currently running, sir.", browser)
+                    }
+                } else {
+                    format!("No, {} is not running, sir.", browser)
+                }
+            }
+            "open_browser" => {
+                let browser = result.data.get("browser").and_then(|v| v.as_str()).unwrap_or("Chrome");
+                let running = result.data.get("running").and_then(|v| v.as_bool()).unwrap_or(false);
+
+                if running {
+                    format!("{} is now open and active, sir.", browser)
+                } else {
+                    format!("Attempted to open {}, sir.", browser)
+                }
+            }
+            "browser_navigate" => {
+                let url = result.data.get("url").and_then(|v| v.as_str()).unwrap_or("the requested URL");
+                format!("Navigated to {}, sir.", url)
+            }
+            "browser_back" => "Going back, sir.".to_string(),
+            "browser_forward" => "Going forward, sir.".to_string(),
+            "browser_reload" => "I've refreshed the page, sir.".to_string(),
+            "browser_current_page" => {
+                let url = result.data.get("current_url").and_then(|v| v.as_str());
+                let title = result.data.get("current_page_title").and_then(|v| v.as_str());
+                match (title, url) {
+                    (Some(t), Some(u)) => format!("You are currently on '{}' at {}, sir.", t, u),
+                    (Some(t), None) => format!("You are currently on page '{}', sir.", t),
+                    (None, Some(u)) => format!("You are currently at {}, sir.", u),
+                    (None, None) => "Unable to determine current page URL, sir.".to_string(),
+                }
+            }
+            "browser_list_tabs" => {
+                let count = result.data.get("tab_count").and_then(|v| v.as_u64()).unwrap_or(0);
+                if count == 0 {
+                    "No open browser tabs were found, sir.".to_string()
+                } else if count == 1 {
+                    "You have 1 open tab, sir.".to_string()
+                } else {
+                    format!("You have {} tabs open, sir.", count)
+                }
+            }
+            "browser_new_tab" => "Opened a new tab, sir.".to_string(),
+            "browser_switch_tab" => {
+                if let Some(tab_obj) = result.data.get("tab") {
+                    let title = tab_obj.get("title").and_then(|v| v.as_str()).unwrap_or("tab");
+                    let id = tab_obj.get("tab_id").and_then(|v| v.as_u64()).unwrap_or(1);
+                    format!("Switched to tab {}, '{}', sir.", id, title)
+                } else {
+                    "Switched tab, sir.".to_string()
+                }
+            }
+            "browser_close_tab" => "Closed the tab, sir.".to_string(),
+            "read_screen" => {
+                let has_text = result
+                    .data
+                    .get("has_text")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let text = result
+                    .data
+                    .get("text")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+
+                if has_text && !text.trim().is_empty() {
+                    format!("The text on your screen is: {}.", text.trim())
+                } else {
+                    "The screen does not appear to contain readable text.".to_string()
+                }
+            }
+            "read_screen_text" => {
+                let has_text = result
+                    .data
+                    .get("has_text")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let text = result
+                    .data
+                    .get("text")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+
+                if has_text && !text.trim().is_empty() {
+                    format!("The text on your screen is: {}.", text.trim())
+                } else {
+                    "The screen does not appear to contain readable text.".to_string()
+                }
+            }
             _ => "Action completed, sir.".to_string(),
         }
     }
@@ -1185,7 +1878,7 @@ mod tests {
 
         let mut sub = orchestrator.event_bus().subscribe();
 
-        let outcome = orchestrator.execute_command("open chrome").await;
+        let outcome = orchestrator.execute_command("open notepad").await;
 
         match outcome {
             ExecutionOutcome::Success {
@@ -1195,7 +1888,7 @@ mod tests {
                 ..
             } => {
                 assert_eq!(tool_name, "open_application");
-                assert_eq!(spoken_response, "Chrome is open, sir.");
+                assert_eq!(spoken_response, "Notepad is open, sir.");
                 assert_eq!(tool_data["pid"], 1234);
             }
             _ => panic!("Expected Success outcome"),
@@ -1280,9 +1973,12 @@ mod tests {
         assert_eq!(intent.arguments["width"], 1280);
 
         // App launch regression
-        let intent = orchestrator.parse_intent("open chrome").unwrap();
+        let intent = orchestrator.parse_intent("open notepad").unwrap();
         assert_eq!(intent.tool_name, "open_application");
-        assert_eq!(intent.arguments["application"], "chrome");
+        assert_eq!(intent.arguments["application"], "notepad");
+
+        let intent = orchestrator.parse_intent("open chrome").unwrap();
+        assert_eq!(intent.tool_name, "open_browser");
 
         let intent = orchestrator.parse_intent("open spotify").unwrap();
         assert_eq!(intent.tool_name, "open_application");
@@ -1383,9 +2079,12 @@ mod tests {
         assert_eq!(intent.tool_name, "is_application_running");
         assert_eq!(intent.arguments["target"], "notepad");
 
-        let intent = orchestrator.parse_intent("is chrome running").unwrap();
+        let intent = orchestrator.parse_intent("is calculator running?").unwrap();
         assert_eq!(intent.tool_name, "is_application_running");
-        assert_eq!(intent.arguments["target"], "chrome");
+        assert_eq!(intent.arguments["target"], "calculator");
+
+        let intent = orchestrator.parse_intent("is chrome running").unwrap();
+        assert_eq!(intent.tool_name, "browser_status");
 
         let intent = orchestrator.parse_intent("is spotify running?").unwrap();
         assert_eq!(intent.tool_name, "is_application_running");
@@ -1546,4 +2245,309 @@ mod tests {
             panic!("Expected Success outcome");
         }
     }
+
+    #[test]
+    fn test_parse_intent_describe_screen_commands() {
+        let adapter = Arc::new(MockAdapter::new(false));
+        let orchestrator = Orchestrator::new(adapter);
+
+        let commands = vec![
+            "describe my screen",
+            "describe the screen",
+            "what is on my screen?",
+            "what is visible on my screen",
+            "what do you see",
+            "look at my screen",
+            "analyze my screen",
+        ];
+
+        for cmd in commands {
+            let intent = orchestrator.parse_intent(cmd).unwrap();
+            assert_eq!(intent.tool_name, "describe_screen");
+        }
+
+        let custom_intent = orchestrator.parse_intent("what application is visible on my screen?").unwrap();
+        assert_eq!(custom_intent.tool_name, "describe_screen");
+        assert!(custom_intent.arguments["prompt"].as_str().unwrap().contains("application"));
+    }
+
+    #[test]
+    fn test_parse_intent_read_screen_text_commands() {
+        let adapter = Arc::new(MockAdapter::new(false));
+        let orchestrator = Orchestrator::new(adapter);
+
+        // Spec-required phrases that must route to read_screen
+        let ocr_commands = vec![
+            "read my screen",
+            "read the screen",
+            "read the text on my screen",
+            "what text is on my screen",
+            "what text is visible on my screen",
+            "what does the screen say",
+            "what does my screen say",
+            "what does this screen say",
+            "extract the text from my screen",
+            "read everything on the screen",
+            "can you read my screen",
+            "tell me what is written on my screen",
+            "Can you tell me what text is visible on my screen?",
+            "Could you read what's on my screen?",
+            "Please read the text on my screen.",
+        ];
+
+        for cmd in ocr_commands {
+            let intent = orchestrator.parse_intent(cmd).unwrap();
+            assert_eq!(
+                intent.tool_name, "read_screen",
+                "Command failed to parse as read_screen: {}",
+                cmd
+            );
+        }
+    }
+
+    #[test]
+    fn test_visual_vs_ocr_separation() {
+        let adapter = Arc::new(MockAdapter::new(false));
+        let orchestrator = Orchestrator::new(adapter);
+
+        // Visual requests -> describe_screen
+        let visual_cmd = orchestrator.parse_intent("what do you see on my screen").unwrap();
+        assert_eq!(visual_cmd.tool_name, "describe_screen");
+
+        let visual_cmd2 = orchestrator.parse_intent("describe my screen").unwrap();
+        assert_eq!(visual_cmd2.tool_name, "describe_screen");
+
+        // Text requests -> read_screen (canonical)
+        let ocr_cmd = orchestrator.parse_intent("what text is visible on my screen").unwrap();
+        assert_eq!(ocr_cmd.tool_name, "read_screen");
+
+        let ocr_cmd2 = orchestrator.parse_intent("read my screen").unwrap();
+        assert_eq!(ocr_cmd2.tool_name, "read_screen");
+
+        let ocr_cmd3 = orchestrator.parse_intent("what does my screen say").unwrap();
+        assert_eq!(ocr_cmd3.tool_name, "read_screen");
+
+        let ocr_cmd4 = orchestrator.parse_intent("read everything on the screen").unwrap();
+        assert_eq!(ocr_cmd4.tool_name, "read_screen");
+    }
+
+    // ============================================================
+    // detect_screen_elements orchestrator tests (M08.04)
+    // ============================================================
+
+    #[test]
+    fn test_parse_intent_detect_screen_elements_exact_commands() {
+        let adapter = Arc::new(MockAdapter::new(false));
+        let orchestrator = Orchestrator::new(adapter);
+
+        let exact_commands = vec![
+            "detect_screen_elements",
+            "detect screen elements",
+            "what buttons are on my screen",
+            "what buttons are visible",
+            "what can i click",
+            "what elements are on my screen",
+            "what elements are visible",
+            "find elements on screen",
+            "find elements on my screen",
+        ];
+
+        for cmd in exact_commands {
+            let intent = orchestrator.parse_intent(cmd).unwrap();
+            assert_eq!(
+                intent.tool_name, "detect_screen_elements",
+                "Expected detect_screen_elements for: {:?}", cmd
+            );
+        }
+    }
+
+    #[test]
+    fn test_parse_intent_detect_screen_elements_find_prefix_extracts_query() {
+        let adapter = Arc::new(MockAdapter::new(false));
+        let orchestrator = Orchestrator::new(adapter);
+
+        let intent = orchestrator.parse_intent("find the Chrome icon").unwrap();
+        assert_eq!(intent.tool_name, "detect_screen_elements");
+        assert_eq!(intent.arguments["query"].as_str(), Some("chrome icon"));
+
+        let intent = orchestrator.parse_intent("find the search box").unwrap();
+        assert_eq!(intent.tool_name, "detect_screen_elements");
+        assert_eq!(intent.arguments["query"].as_str(), Some("search box"));
+
+        let intent = orchestrator.parse_intent("where is Chrome").unwrap();
+        assert_eq!(intent.tool_name, "detect_screen_elements");
+        // query should contain "chrome"
+        assert!(intent.arguments["query"].as_str().unwrap_or("").contains("chrome"));
+
+        let intent = orchestrator.parse_intent("where is the taskbar").unwrap();
+        assert_eq!(intent.tool_name, "detect_screen_elements");
+        assert_eq!(intent.arguments["query"].as_str(), Some("taskbar"));
+
+        let intent = orchestrator.parse_intent("locate the close button").unwrap();
+        assert_eq!(intent.tool_name, "detect_screen_elements");
+        assert_eq!(intent.arguments["query"].as_str(), Some("close button"));
+    }
+
+    #[test]
+    fn test_parse_intent_detect_screen_elements_no_query_when_generic() {
+        let adapter = Arc::new(MockAdapter::new(false));
+        let orchestrator = Orchestrator::new(adapter);
+
+        // Generic element queries have no specific query argument
+        let intent = orchestrator.parse_intent("what buttons are on my screen").unwrap();
+        assert_eq!(intent.tool_name, "detect_screen_elements");
+
+        let intent = orchestrator.parse_intent("what can i click").unwrap();
+        assert_eq!(intent.tool_name, "detect_screen_elements");
+    }
+
+    #[test]
+    fn test_visual_vs_ocr_vs_detect_three_way_separation() {
+        let adapter = Arc::new(MockAdapter::new(false));
+        let orchestrator = Orchestrator::new(adapter);
+
+        // 1. Visual description -> describe_screen
+        let v = orchestrator.parse_intent("describe my screen").unwrap();
+        assert_eq!(v.tool_name, "describe_screen");
+
+        let v2 = orchestrator.parse_intent("what do you see on my screen").unwrap();
+        assert_eq!(v2.tool_name, "describe_screen");
+
+        // 2. Text extraction -> read_screen
+        let r = orchestrator.parse_intent("read my screen").unwrap();
+        assert_eq!(r.tool_name, "read_screen");
+
+        let r2 = orchestrator.parse_intent("what text is on my screen").unwrap();
+        assert_eq!(r2.tool_name, "read_screen");
+
+        // 3. Element detection -> detect_screen_elements
+        let d = orchestrator.parse_intent("find the Chrome icon").unwrap();
+        assert_eq!(d.tool_name, "detect_screen_elements");
+
+        let d2 = orchestrator.parse_intent("what buttons are on my screen").unwrap();
+        assert_eq!(d2.tool_name, "detect_screen_elements");
+
+        let d3 = orchestrator.parse_intent("where is the search box").unwrap();
+        assert_eq!(d3.tool_name, "detect_screen_elements");
+    }
+
+    #[test]
+    fn test_parse_intent_inspect_ui_tree_commands() {
+        let adapter = Arc::new(MockAdapter::new(false));
+        let orchestrator = Orchestrator::new(adapter);
+
+        let inspect_commands = vec![
+            "inspect_ui_tree",
+            "inspect ui tree",
+            "inspect the ui",
+            "inspect ui",
+            "inspect active window",
+            "inspect the current window",
+        ];
+
+        for cmd in inspect_commands {
+            let intent = orchestrator.parse_intent(cmd).unwrap();
+            assert_eq!(
+                intent.tool_name, "inspect_ui_tree",
+                "Expected inspect_ui_tree for: {:?}", cmd
+            );
+        }
+    }
+
+    #[test]
+    fn test_parse_intent_inspect_ui_tree_extracts_query() {
+        let adapter = Arc::new(MockAdapter::new(false));
+        let orchestrator = Orchestrator::new(adapter);
+
+        let intent = orchestrator.parse_intent("find the Soft Reset button").unwrap();
+        assert_eq!(intent.tool_name, "inspect_ui_tree");
+        assert_eq!(intent.arguments["query"].as_str(), Some("soft reset button"));
+
+        let intent = orchestrator.parse_intent("inspect search box").unwrap();
+        assert_eq!(intent.tool_name, "inspect_ui_tree");
+        assert_eq!(intent.arguments["query"].as_str(), Some("search box"));
+
+        let intent = orchestrator.parse_intent("inspect the UI for buttons").unwrap();
+        assert_eq!(intent.tool_name, "inspect_ui_tree");
+        assert_eq!(intent.arguments["query"].as_str(), Some("buttons"));
+    }
+
+    #[tokio::test]
+    async fn test_orchestrator_inspect_ui_tree_executes() {
+        let adapter = Arc::new(MockAdapter::new(false));
+        let orchestrator = Orchestrator::new(adapter);
+
+        let outcome = orchestrator.execute_command("inspect the UI").await;
+        if let ExecutionOutcome::Success { tool_name, .. } = outcome {
+            assert_eq!(tool_name, "inspect_ui_tree");
+        } else {
+            panic!("Expected Success outcome for inspect the UI");
+        }
+    }
+
+    #[test]
+    fn test_parse_intent_browser_commands() {
+        let adapter = Arc::new(MockAdapter::new(false));
+        let orchestrator = Orchestrator::new(adapter);
+
+        let status_cmd = orchestrator.parse_intent("is Chrome open").unwrap();
+        assert_eq!(status_cmd.tool_name, "browser_status");
+
+        let status_cmd2 = orchestrator.parse_intent("browser status").unwrap();
+        assert_eq!(status_cmd2.tool_name, "browser_status");
+
+        let open_cmd = orchestrator.parse_intent("open Chrome").unwrap();
+        assert_eq!(open_cmd.tool_name, "open_browser");
+
+        let open_cmd2 = orchestrator.parse_intent("launch chrome").unwrap();
+        assert_eq!(open_cmd2.tool_name, "open_browser");
+
+        let nav_cmd = orchestrator.parse_intent("go to https://www.google.com").unwrap();
+        assert_eq!(nav_cmd.tool_name, "browser_navigate");
+        assert_eq!(nav_cmd.arguments["url"].as_str(), Some("https://www.google.com"));
+
+        let nav_cmd2 = orchestrator.parse_intent("navigate to linkedin.com").unwrap();
+        assert_eq!(nav_cmd2.tool_name, "browser_navigate");
+        assert_eq!(nav_cmd2.arguments["url"].as_str(), Some("linkedin.com"));
+
+        let back_cmd = orchestrator.parse_intent("go back").unwrap();
+        assert_eq!(back_cmd.tool_name, "browser_back");
+
+        let fwd_cmd = orchestrator.parse_intent("go forward").unwrap();
+        assert_eq!(fwd_cmd.tool_name, "browser_forward");
+
+        let reload_cmd = orchestrator.parse_intent("reload the page").unwrap();
+        assert_eq!(reload_cmd.tool_name, "browser_reload");
+
+        let curr_cmd = orchestrator.parse_intent("what page am i on").unwrap();
+        assert_eq!(curr_cmd.tool_name, "browser_current_page");
+
+        let tabs_cmd = orchestrator.parse_intent("show my tabs").unwrap();
+        assert_eq!(tabs_cmd.tool_name, "browser_list_tabs");
+
+        let new_tab_cmd = orchestrator.parse_intent("open a new tab").unwrap();
+        assert_eq!(new_tab_cmd.tool_name, "browser_new_tab");
+
+        let switch_tab_cmd = orchestrator.parse_intent("switch to tab 2").unwrap();
+        assert_eq!(switch_tab_cmd.tool_name, "browser_switch_tab");
+        assert_eq!(switch_tab_cmd.arguments["tab_index"], 2);
+
+        let close_tab_cmd = orchestrator.parse_intent("close this tab").unwrap();
+        assert_eq!(close_tab_cmd.tool_name, "browser_close_tab");
+    }
+
+    #[tokio::test]
+    async fn test_orchestrator_browser_tools_execute() {
+        let adapter = Arc::new(MockAdapter::new(false));
+        let orchestrator = Orchestrator::new(adapter);
+
+        let outcome = orchestrator.execute_command("is Chrome open").await;
+        if let ExecutionOutcome::Success { tool_name, .. } = outcome {
+            assert_eq!(tool_name, "browser_status");
+        } else {
+            panic!("Expected Success outcome for is Chrome open");
+        }
+    }
 }
+
+

@@ -91,4 +91,14 @@ impl ModelGateway {
         let resp = self.router.generate(&request).await?;
         Ok(resp.text)
     }
+
+    /// Analyze an image or screenshot using a VisionModelProvider.
+    #[instrument(skip(self, vision_provider, request))]
+    pub async fn analyze_image(
+        &self,
+        vision_provider: &dyn crate::vision::VisionModelProvider,
+        request: &crate::vision::VisionRequest,
+    ) -> Result<crate::vision::VisionResponse, ModelError> {
+        vision_provider.analyze_image(request).await
+    }
 }

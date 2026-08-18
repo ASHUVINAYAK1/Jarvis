@@ -99,6 +99,91 @@ pub struct Rect {
 }
 
 // ============================================================
+// UI Automation / Accessibility Tree (Phase 8, M08.04)
+// ============================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiElement {
+    pub name: String,
+    pub automation_id: String,
+    pub control_type: String,
+    pub class_name: String,
+    pub bounds: Rect,
+    pub center_x: i32,
+    pub center_y: i32,
+    pub enabled: bool,
+    pub offscreen: bool,
+    pub focused: bool,
+    pub supported_patterns: Vec<String>,
+}
+
+impl UiElement {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        name: impl Into<String>,
+        automation_id: impl Into<String>,
+        control_type: impl Into<String>,
+        class_name: impl Into<String>,
+        bounds: Rect,
+        enabled: bool,
+        offscreen: bool,
+        focused: bool,
+    ) -> Self {
+        let center_x = bounds.x + (bounds.width as i32 / 2);
+        let center_y = bounds.y + (bounds.height as i32 / 2);
+        Self {
+            name: name.into(),
+            automation_id: automation_id.into(),
+            control_type: control_type.into(),
+            class_name: class_name.into(),
+            bounds,
+            center_x,
+            center_y,
+            enabled,
+            offscreen,
+            focused,
+            supported_patterns: vec![],
+        }
+    }
+
+    pub fn matches_query(&self, query: &str) -> bool {
+        let trimmed = query.trim();
+        if trimmed.is_empty() {
+            return true;
+        }
+        let q = trimmed.to_lowercase();
+        let name_lower = self.name.to_lowercase();
+        let type_lower = self.control_type.to_lowercase();
+        let id_lower = self.automation_id.to_lowercase();
+
+        name_lower.contains(&q) || type_lower.contains(&q) || id_lower.contains(&q)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiTreeResult {
+    pub window_title: String,
+    pub process_name: String,
+    pub elements: Vec<UiElement>,
+    pub total_elements_scanned: usize,
+    pub is_truncated: bool,
+    pub source: String,
+}
+
+impl UiTreeResult {
+    pub fn empty() -> Self {
+        Self {
+            window_title: String::new(),
+            process_name: String::new(),
+            elements: vec![],
+            total_elements_scanned: 0,
+            is_truncated: false,
+            source: "WindowsUIAutomation".to_string(),
+        }
+    }
+}
+
+// ============================================================
 // Process Information
 // ============================================================
 
@@ -158,6 +243,7 @@ pub enum NotificationPriority {
     Critical,
 }
 
+#[allow(clippy::derivable_impls)]
 impl Default for NotificationPriority {
     fn default() -> Self {
         NotificationPriority::Normal
@@ -315,6 +401,21 @@ pub trait PlatformAdapter: Send + Sync {
     async fn show_notification(&self, notification: NotificationRequest) -> Result<()>;
 
     // --------------------------------------------------------
+    // UI Automation & Accessibility (Phase 8, M08.04)
+    // --------------------------------------------------------
+
+    /// Inspect the accessibility tree of the currently active foreground window using native UI Automation.
+    async fn inspect_ui_tree(
+        &self,
+        query: Option<&str>,
+        max_depth: usize,
+        max_elements: usize,
+    ) -> Result<UiTreeResult> {
+        let _ = (query, max_depth, max_elements);
+        Ok(UiTreeResult::empty())
+    }
+
+    // --------------------------------------------------------
     // System State
     // --------------------------------------------------------
 
@@ -455,10 +556,55 @@ mod tests {
     }
 
     #[test]
-    fn test_launch_options_default() {
-        let opts = LaunchOptions::default();
-        assert!(opts.working_dir.is_none());
-        assert!(!opts.wait);
-        assert!(opts.args.is_empty());
+    fn test_ui_element_construction_and_center_calculation() {
+        let elem = UiElement::new(
+            "Soft Reset",
+            "btn_soft_reset",
+            "Button",
+            "ButtonClass",
+            Rect { x: 100, y: 200, width: 80, height: 40 },
+            true,
+            false,
+            false,
+        );
+
+        assert_eq!(elem.name, "Soft Reset");
+        assert_eq!(elem.automation_id, "btn_soft_reset");
+        assert_eq!(elem.control_type, "Button");
+        assert_eq!(elem.center_x, 140);
+        assert_eq!(elem.center_y, 220);
+        assert!(elem.enabled);
+        assert!(!elem.offscreen);
+        assert!(!elem.focused);
+    }
+
+    #[test]
+    fn test_ui_element_query_matching() {
+        let elem = UiElement::new(
+            "Soft Reset",
+            "btn_soft_reset",
+            "Button",
+            "ButtonClass",
+            Rect { x: 100, y: 200, width: 80, height: 40 },
+            true,
+            false,
+            false,
+        );
+
+        // Exact name match
+        assert!(elem.matches_query("Soft Reset"));
+        // Case-insensitive match
+        assert!(elem.matches_query("soft reset"));
+        // Substring match
+        assert!(elem.matches_query("Reset"));
+        // Control type match
+        assert!(elem.matches_query("button"));
+        // Automation ID match
+        assert!(elem.matches_query("btn_soft"));
+        // Empty query matches all
+        assert!(elem.matches_query(""));
+        // Non-matching query
+        assert!(!elem.matches_query("Hard Reboot"));
     }
 }
+

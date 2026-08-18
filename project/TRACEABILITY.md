@@ -57,8 +57,9 @@
 | R-A04 | Structured output (JSON mode) | Doc 3, 8 | 4 | M04.07 | PLANNED |
 | R-A05 | Hardware-aware model selection | Doc 2, 8 | 4 | M04.04 | PLANNED |
 | R-A06 | Streaming LLM output | Doc 2, 8 | 4 | M04.06 | PLANNED |
-| R-A07 | Vision model (screenshot understanding) | Doc 2, 8 | 8 | M08.01 | PLANNED |
-| R-A08 | OCR capability | Doc 2, 8, 12 | 8 | M08.03 | PLANNED |
+| R-A07 | Vision model (screenshot understanding) | Doc 2, 8 | 8 | M08.01-02 | services/tools, core/orchestrator | test_describe_screen_tool_success_with_mock_provider | VERIFIED |
+| R-A08 | OCR capability | Doc 2, 8, 12 | 8 | M08.03 | services/ai/src/ocr.rs, services/tools, core/orchestrator | test_read_screen_tool_success_with_mock_ocr, test_visual_vs_ocr_separation | VERIFIED |
+| R-A09 | Screen Element Detection / Bounding Box | Doc 2, 8, 12 | 8 | M08.04 | services/ai/src/screen_elements.rs, services/tools, core/orchestrator | test_detect_screen_elements_tool_execute_with_mock_vision, test_visual_vs_ocr_vs_detect_three_way_separation | VERIFIED |
 
 ---
 
@@ -105,7 +106,7 @@
 | R-W10 | Windows clipboard read/write | Doc 4, 9 | 6 | M06.06 | platforms/windows, services/tools, core/orchestrator | test_clipboard_tools_registration_and_execution | VERIFIED |
 | R-W11 | Windows desktop notifications | Doc 4, 9 | 6 | M06.07 | platforms/windows, services/tools, core/orchestrator | test_show_notification_tool_registration_and_execution | VERIFIED |
 | R-W07 | Windows system tray & system control | Doc 4, 9 | 6, 14 | M06.04, M14.01 | apps/desktop, services/tools | test_system_control_tools_registration_and_execution | VERIFIED |
-| R-W03 | Windows UI Automation (accessibility tree) | Doc 4, 9 | 8, 14 | M08.04 | — | — | PLANNED |
+| R-W03 | Windows UI Automation (accessibility tree) | Doc 4, 9 | 8, 14 | M08.04 | platforms/windows, services/tools, core/orchestrator | test_inspect_ui_tree_tool_execute | VERIFIED |
 | R-W04 | Windows keyboard/mouse control | Doc 4, 9 | 14 | M14.02 | — | — | PLANNED |
 | R-W05 | Windows auto-start on login | Doc 9 | 14 | M14.03 | — | — | PLANNED |
 | R-W06 | Windows Credential Manager | Doc 9, 14 | 11, 14 | M11.04 | — | — | PLANNED |
@@ -123,8 +124,8 @@
 
 | Req ID | Requirement | Source Doc | Phase | Milestone | Status |
 |--------|-------------|-----------|-------|-----------|--------|
-| R-B01 | Browser session management | Doc 5, 12 | 9 | M09.01 | PLANNED |
-| R-B02 | Navigation and tab control | Doc 5, 12 | 9 | M09.02 | PLANNED |
+| R-B01 | Browser session management | Doc 5, 12 | 9 | M09.01 | COMPLETE & VERIFIED |
+| R-B02 | Navigation and tab control | Doc 5, 12 | 9 | M09.02 | COMPLETE & VERIFIED |
 | R-B03 | DOM element finding | Doc 5, 12 | 9 | M09.03 | PLANNED |
 | R-B04 | Form filling | Doc 5, 12 | 9 | M09.04 | PLANNED |
 | R-B05 | Login state detection | Doc 5, 12 | 9 | M09.06 | PLANNED |
@@ -159,4 +160,4 @@
 
 ---
 
-*Last updated: 2026-08-17*
+*Last updated: 2026-08-18*

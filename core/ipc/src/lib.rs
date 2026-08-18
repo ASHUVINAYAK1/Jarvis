@@ -342,8 +342,8 @@ mod tests {
             server.handle_next_request().await.unwrap();
         });
 
-        // Client submits "open chrome" across the IPC wire
-        let outcome = client.submit_command("open chrome").await.unwrap();
+        // Client submits "open notepad" across the IPC wire
+        let outcome = client.submit_command("open notepad").await.unwrap();
 
         server_task.await.unwrap();
 
@@ -355,7 +355,7 @@ mod tests {
                 ..
             } => {
                 assert_eq!(tool_name, "open_application");
-                assert_eq!(spoken_response, "Chrome is open, sir.");
+                assert_eq!(spoken_response, "Notepad is open, sir.");
                 assert_eq!(tool_data["pid"], 9999);
             }
             _ => panic!("Expected Success outcome across IPC wire"),

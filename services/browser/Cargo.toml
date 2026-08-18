@@ -1,10 +1,10 @@
 [package]
-name = "jarvis-tools"
+name = "jarvis-browser"
 version.workspace = true
 edition.workspace = true
 
-# Tool runtime and registry for JARVIS actions
-# Phase 7 / Vertical Slice 1
+# Browser session management and automation crate for JARVIS
+# Phase 9 — Browser & Web Agent (M09.01)
 
 [dependencies]
 tokio = { workspace = true }
@@ -19,6 +19,3 @@ chrono = { workspace = true }
 
 # Workspace crates
 jarvis-platform = { path = "../../crates/platform" }
-jarvis-policy = { path = "../../core/policy" }
-jarvis-ai = { path = "../ai" }
-jarvis-browser = { path = "../browser" }

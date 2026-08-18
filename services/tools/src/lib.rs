@@ -33,7 +33,12 @@ use thiserror::Error;
 use tracing::{error, info, instrument};
 use uuid::Uuid;
 
+use jarvis_ai::{
+    build_detection_prompt, parse_elements_from_vision_response, OcrProvider, OcrRequest,
+    OllamaVisionProvider, TesseractOcrProvider, VisionImage, VisionModelProvider, VisionRequest,
+};
 use jarvis_platform::{PlatformAdapter, Rect};
+use jarvis_browser::TabTarget;
 use jarvis_policy::RiskLevel;
 
 // ============================================================
@@ -2461,6 +2466,1698 @@ impl Tool for ShowNotificationTool {
 }
 
 // ============================================================
+// Vision Tools: DescribeScreenTool
+// ============================================================
+
+/// Tool to capture the current desktop screen and generate a visual description using a local vision model.
+pub struct DescribeScreenTool {
+    definition: ToolDefinition,
+    vision_provider: Arc<dyn VisionModelProvider>,
+}
+
+impl DescribeScreenTool {
+    pub fn new() -> Self {
+        Self {
+            definition: ToolDefinition {
+                id: "describe_screen".to_string(),
+                name: "Describe Screen".to_string(),
+                description: "Captures the current desktop screenshot and returns a visual description using the local vision model.".to_string(),
+                parameters_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "prompt": {
+                            "type": "string",
+                            "description": "Optional custom prompt or question describing what visual information to analyze"
+                        }
+                    }
+                }),
+                risk_level: RiskLevel::Low,
+                required_permissions: vec!["screen_capture".to_string(), "ai_vision".to_string()],
+                timeout_secs: 60,
+            },
+            vision_provider: Arc::new(OllamaVisionProvider::default()),
+        }
+    }
+
+    pub fn with_provider(vision_provider: Arc<dyn VisionModelProvider>) -> Self {
+        Self {
+            definition: ToolDefinition {
+                id: "describe_screen".to_string(),
+                name: "Describe Screen".to_string(),
+                description: "Captures the current desktop screenshot and returns a visual description using the local vision model.".to_string(),
+                parameters_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "prompt": {
+                            "type": "string",
+                            "description": "Optional custom prompt or question describing what visual information to analyze"
+                        }
+                    }
+                }),
+                risk_level: RiskLevel::Low,
+                required_permissions: vec!["screen_capture".to_string(), "ai_vision".to_string()],
+                timeout_secs: 60,
+            },
+            vision_provider,
+        }
+    }
+}
+
+impl Default for DescribeScreenTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl Tool for DescribeScreenTool {
+    fn definition(&self) -> &ToolDefinition {
+        &self.definition
+    }
+
+    async fn execute(
+        &self,
+        request: ToolRequest,
+        ctx: &ToolExecutionContext,
+    ) -> Result<ToolResult, ToolError> {
+        let start = Instant::now();
+
+        // 1. Capture screen via platform adapter
+        let screenshot = ctx
+            .platform_adapter
+            .take_screenshot()
+            .await
+            .map_err(|e| ToolError::ExecutionFailed {
+                tool: self.definition.id.clone(),
+                cause: format!("Failed to capture desktop screenshot: {}", e),
+            })?;
+
+        if screenshot.data.is_empty() {
+            return Ok(ToolResult::failure(
+                request.request_id,
+                self.definition.id.clone(),
+                "Captured screenshot is empty (0 bytes)".to_string(),
+                start.elapsed().as_millis() as u64,
+            ));
+        }
+
+        // 2. Extract prompt (default to general visual query if not provided)
+        let prompt_str = request
+            .arguments
+            .get("prompt")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or("Describe what is visible on the screen.");
+
+        // 3. Build VisionImage and validate
+        let image = VisionImage::from_png_bytes(screenshot.data)
+            .with_dimensions(screenshot.width, screenshot.height);
+
+        if let Err(val_err) = image.validate(10 * 1024 * 1024, Some((4096, 4096))) {
+            return Ok(ToolResult::failure(
+                request.request_id,
+                self.definition.id.clone(),
+                format!("Vision image validation failed: {}", val_err),
+                start.elapsed().as_millis() as u64,
+            ));
+        }
+
+        // 4. Send request through vision_provider
+        let vision_req = VisionRequest::new(image, prompt_str);
+        match self.vision_provider.analyze_image(&vision_req).await {
+            Ok(resp) => {
+                let elapsed = start.elapsed().as_millis() as u64;
+                Ok(ToolResult::success(
+                    request.request_id,
+                    self.definition.id.clone(),
+                    json!({
+                        "description": resp.description,
+                        "model_id": resp.model_id,
+                        "provider": format!("{:?}", resp.provider_type),
+                        "latency_ms": resp.latency_ms
+                    }),
+                    elapsed,
+                ))
+            }
+            Err(e) => Ok(ToolResult::failure(
+                request.request_id,
+                self.definition.id.clone(),
+                format!("Vision model inference failed: {}", e),
+                start.elapsed().as_millis() as u64,
+            )),
+        }
+    }
+}
+
+// ============================================================
+// OCR Tools: ReadScreenTextTool
+// ============================================================
+
+/// Tool to capture the current desktop screen and extract visible text using local Tesseract OCR.
+pub struct ReadScreenTextTool {
+    definition: ToolDefinition,
+    ocr_provider: Arc<dyn OcrProvider>,
+}
+
+impl ReadScreenTextTool {
+    pub fn new() -> Self {
+        Self {
+            definition: ToolDefinition {
+                id: "read_screen_text".to_string(),
+                name: "Read Screen Text".to_string(),
+                description: "Captures the current desktop screenshot and extracts visible text using local Tesseract OCR.".to_string(),
+                parameters_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "language": {
+                            "type": "string",
+                            "description": "Optional OCR language code (default: 'eng')"
+                        }
+                    }
+                }),
+                risk_level: RiskLevel::Low,
+                required_permissions: vec!["screen_capture".to_string(), "ocr".to_string()],
+                timeout_secs: 60,
+            },
+            ocr_provider: Arc::new(TesseractOcrProvider::new()),
+        }
+    }
+
+    pub fn with_provider(ocr_provider: Arc<dyn OcrProvider>) -> Self {
+        Self {
+            definition: ToolDefinition {
+                id: "read_screen_text".to_string(),
+                name: "Read Screen Text".to_string(),
+                description: "Captures the current desktop screenshot and extracts visible text using local Tesseract OCR.".to_string(),
+                parameters_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "language": {
+                            "type": "string",
+                            "description": "Optional OCR language code (default: 'eng')"
+                        }
+                    }
+                }),
+                risk_level: RiskLevel::Low,
+                required_permissions: vec!["screen_capture".to_string(), "ocr".to_string()],
+                timeout_secs: 60,
+            },
+            ocr_provider,
+        }
+    }
+}
+
+impl Default for ReadScreenTextTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl Tool for ReadScreenTextTool {
+    fn definition(&self) -> &ToolDefinition {
+        &self.definition
+    }
+
+    async fn execute(
+        &self,
+        request: ToolRequest,
+        ctx: &ToolExecutionContext,
+    ) -> Result<ToolResult, ToolError> {
+        let start = Instant::now();
+
+        // 1. Capture screen via platform adapter
+        let screenshot = ctx
+            .platform_adapter
+            .take_screenshot()
+            .await
+            .map_err(|e| ToolError::ExecutionFailed {
+                tool: self.definition.id.clone(),
+                cause: format!("Failed to capture desktop screenshot for OCR: {}", e),
+            })?;
+
+        if screenshot.data.is_empty() {
+            return Ok(ToolResult::failure(
+                request.request_id,
+                self.definition.id.clone(),
+                "Captured screenshot is empty (0 bytes)".to_string(),
+                start.elapsed().as_millis() as u64,
+            ));
+        }
+
+        // 2. Extract optional language hint
+        let lang = request
+            .arguments
+            .get("language")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        // 3. Construct OcrRequest
+        let mut ocr_req = OcrRequest::new(screenshot.data);
+        if let Some(l) = lang {
+            ocr_req = ocr_req.with_language(l);
+        }
+
+        // 4. Perform text extraction via OCR provider
+        match self.ocr_provider.extract_text(&ocr_req).await {
+            Ok(resp) => {
+                let elapsed = start.elapsed().as_millis() as u64;
+                Ok(ToolResult::success(
+                    request.request_id,
+                    self.definition.id.clone(),
+                    json!({
+                        "text": resp.text,
+                        "has_text": resp.has_text,
+                        "char_count": resp.char_count,
+                        "confidence": resp.confidence,
+                        "provider": format!("{:?}", resp.provider_type),
+                        "latency_ms": resp.latency_ms
+                    }),
+                    elapsed,
+                ))
+            }
+            Err(e) => Ok(ToolResult::failure(
+                request.request_id,
+                self.definition.id.clone(),
+                format!("{}", e),
+                start.elapsed().as_millis() as u64,
+            )),
+        }
+    }
+}
+
+// ============================================================
+// OCR Tools: ReadScreenTool (canonical "read_screen" tool name per M08.03 spec)
+// ============================================================
+
+/// Tool to capture the current desktop screen and extract all visible text using local Tesseract OCR.
+/// This is the canonical `read_screen` tool registered under the M08.03 milestone spec.
+/// Functionally equivalent to `ReadScreenTextTool`, registered under the id `"read_screen"`.
+pub struct ReadScreenTool {
+    definition: ToolDefinition,
+    ocr_provider: Arc<dyn OcrProvider>,
+}
+
+impl ReadScreenTool {
+    pub fn new() -> Self {
+        Self {
+            definition: ToolDefinition {
+                id: "read_screen".to_string(),
+                name: "Read Screen".to_string(),
+                description: "Captures the current desktop screenshot and extracts all visible text using local Tesseract OCR. Use for commands like 'read my screen', 'what does my screen say', 'read the text on my screen'.".to_string(),
+                parameters_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "language": {
+                            "type": "string",
+                            "description": "Optional OCR language code (default: 'eng')"
+                        }
+                    }
+                }),
+                risk_level: RiskLevel::Low,
+                required_permissions: vec!["screen_capture".to_string(), "ocr".to_string()],
+                timeout_secs: 60,
+            },
+            ocr_provider: Arc::new(TesseractOcrProvider::new()),
+        }
+    }
+
+    /// Inject an alternative OCR provider (e.g. MockOcrProvider for unit tests).
+    pub fn with_provider(ocr_provider: Arc<dyn OcrProvider>) -> Self {
+        Self {
+            definition: ToolDefinition {
+                id: "read_screen".to_string(),
+                name: "Read Screen".to_string(),
+                description: "Captures the current desktop screenshot and extracts all visible text using local Tesseract OCR. Use for commands like 'read my screen', 'what does my screen say', 'read the text on my screen'.".to_string(),
+                parameters_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "language": {
+                            "type": "string",
+                            "description": "Optional OCR language code (default: 'eng')"
+                        }
+                    }
+                }),
+                risk_level: RiskLevel::Low,
+                required_permissions: vec!["screen_capture".to_string(), "ocr".to_string()],
+                timeout_secs: 60,
+            },
+            ocr_provider,
+        }
+    }
+}
+
+impl Default for ReadScreenTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl Tool for ReadScreenTool {
+    fn definition(&self) -> &ToolDefinition {
+        &self.definition
+    }
+
+    async fn execute(
+        &self,
+        request: ToolRequest,
+        ctx: &ToolExecutionContext,
+    ) -> Result<ToolResult, ToolError> {
+        let start = Instant::now();
+
+        // 1. Capture screen via platform adapter (reuse existing screenshot infrastructure)
+        let screenshot = ctx
+            .platform_adapter
+            .take_screenshot()
+            .await
+            .map_err(|e| ToolError::ExecutionFailed {
+                tool: self.definition.id.clone(),
+                cause: format!("Failed to capture desktop screenshot for OCR: {}", e),
+            })?;
+
+        if screenshot.data.is_empty() {
+            return Ok(ToolResult::failure(
+                request.request_id,
+                self.definition.id.clone(),
+                "Captured screenshot is empty (0 bytes)".to_string(),
+                start.elapsed().as_millis() as u64,
+            ));
+        }
+
+        // 2. Extract optional language hint
+        let lang = request
+            .arguments
+            .get("language")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        // 3. Construct OcrRequest (PNG bytes from PlatformAdapter::take_screenshot)
+        let mut ocr_req = OcrRequest::new(screenshot.data);
+        if let Some(l) = lang {
+            ocr_req = ocr_req.with_language(l);
+        }
+
+        // 4. Perform text extraction via OCR provider (TesseractOcrProvider in production)
+        match self.ocr_provider.extract_text(&ocr_req).await {
+            Ok(resp) => {
+                let elapsed = start.elapsed().as_millis() as u64;
+                info!(
+                    tool = "read_screen",
+                    has_text = resp.has_text,
+                    char_count = resp.char_count,
+                    latency_ms = resp.latency_ms,
+                    "OCR text extraction completed"
+                );
+                Ok(ToolResult::success(
+                    request.request_id,
+                    self.definition.id.clone(),
+                    json!({
+                        "text": resp.text,
+                        "has_text": resp.has_text,
+                        "char_count": resp.char_count,
+                        "confidence": resp.confidence,
+                        "provider": format!("{:?}", resp.provider_type),
+                        "latency_ms": resp.latency_ms
+                    }),
+                    elapsed,
+                ))
+            }
+            Err(e) => Ok(ToolResult::failure(
+                request.request_id,
+                self.definition.id.clone(),
+                format!("{}", e),
+                start.elapsed().as_millis() as u64,
+            )),
+        }
+    }
+}
+
+// ============================================================
+// Screen Element Detection Tool (M08.04)
+// ============================================================
+
+/// Tool that captures the desktop and uses the existing VisionModelProvider
+/// to detect visible UI elements with bounding boxes.
+///
+/// IMPORTANT: This tool detects and describes elements only.
+/// It does NOT move the mouse, click, type, or perform any UI interaction.
+/// Autonomous interaction belongs to later roadmap phases.
+pub struct DetectScreenElementsTool {
+    definition: ToolDefinition,
+    vision_provider: Arc<dyn VisionModelProvider>,
+}
+
+impl DetectScreenElementsTool {
+    /// Create with the default local Ollama vision provider.
+    pub fn new() -> Self {
+        Self {
+            definition: ToolDefinition {
+                id: "detect_screen_elements".to_string(),
+                name: "Detect Screen Elements".to_string(),
+                description: "Captures the desktop screenshot and uses the local vision model to detect visible UI elements (buttons, icons, inputs, etc.) with approximate bounding boxes and coordinates. Use for queries like 'find the Chrome icon', 'what buttons are visible', 'where is the search box'. Does NOT perform any interaction.".to_string(),
+                parameters_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Optional natural-language element query (e.g. 'find the Chrome icon', 'what buttons are visible')"
+                        },
+                        "min_confidence": {
+                            "type": "number",
+                            "description": "Minimum confidence threshold [0.0, 1.0] for returned elements (default: 0.5)"
+                        }
+                    }
+                }),
+                risk_level: RiskLevel::Low,
+                required_permissions: vec!["screen_capture".to_string(), "vision".to_string()],
+                timeout_secs: 120,
+            },
+            vision_provider: Arc::new(OllamaVisionProvider::default()),
+        }
+    }
+
+    /// Create with an injected VisionModelProvider (for unit tests via MockVisionProvider).
+    pub fn with_vision_provider(vision_provider: Arc<dyn VisionModelProvider>) -> Self {
+        Self {
+            definition: ToolDefinition {
+                id: "detect_screen_elements".to_string(),
+                name: "Detect Screen Elements".to_string(),
+                description: "Captures the desktop screenshot and uses the local vision model to detect visible UI elements (buttons, icons, inputs, etc.) with approximate bounding boxes and coordinates. Use for queries like 'find the Chrome icon', 'what buttons are visible', 'where is the search box'. Does NOT perform any interaction.".to_string(),
+                parameters_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Optional natural-language element query (e.g. 'find the Chrome icon', 'what buttons are visible')"
+                        },
+                        "min_confidence": {
+                            "type": "number",
+                            "description": "Minimum confidence threshold [0.0, 1.0] for returned elements (default: 0.5)"
+                        }
+                    }
+                }),
+                risk_level: RiskLevel::Low,
+                required_permissions: vec!["screen_capture".to_string(), "vision".to_string()],
+                timeout_secs: 120,
+            },
+            vision_provider,
+        }
+    }
+}
+
+impl Default for DetectScreenElementsTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl Tool for DetectScreenElementsTool {
+    fn definition(&self) -> &ToolDefinition {
+        &self.definition
+    }
+
+    async fn execute(
+        &self,
+        request: ToolRequest,
+        ctx: &ToolExecutionContext,
+    ) -> Result<ToolResult, ToolError> {
+        let start = Instant::now();
+
+        // 1. Capture desktop screenshot via existing platform infrastructure
+        let screenshot = ctx
+            .platform_adapter
+            .take_screenshot()
+            .await
+            .map_err(|e| ToolError::ExecutionFailed {
+                tool: self.definition.id.clone(),
+                cause: format!("Failed to capture desktop screenshot for element detection: {}", e),
+            })?;
+
+        if screenshot.data.is_empty() {
+            return Ok(ToolResult::failure(
+                request.request_id,
+                self.definition.id.clone(),
+                "Captured screenshot is empty (0 bytes)".to_string(),
+                start.elapsed().as_millis() as u64,
+            ));
+        }
+
+        // 2. Extract optional query and confidence threshold
+        let query = request
+            .arguments
+            .get("query")
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+
+        let min_confidence = request
+            .arguments
+            .get("min_confidence")
+            .and_then(|v| v.as_f64())
+            .map(|v| v as f32)
+            .unwrap_or(0.5_f32)
+            .clamp(0.0, 1.0);
+
+        // 3. Build the structured detection prompt (reuse build_detection_prompt)
+        let prompt = build_detection_prompt(query.as_deref());
+
+        // 4. Construct VisionImage and VisionRequest using existing types
+        let vision_image = VisionImage::from_png_bytes(screenshot.data)
+            .with_dimensions(screenshot.width, screenshot.height);
+        let vision_request = VisionRequest::new(vision_image, &prompt);
+
+        // 5. Invoke vision model via VisionModelProvider (OllamaVisionProvider / MockVisionProvider)
+        let vision_response = match self.vision_provider.analyze_image(&vision_request).await {
+            Ok(resp) => resp,
+            Err(e) => {
+                return Ok(ToolResult::failure(
+                    request.request_id,
+                    self.definition.id.clone(),
+                    format!("Vision model analysis failed: {}", e),
+                    start.elapsed().as_millis() as u64,
+                ));
+            }
+        };
+
+        let elapsed = start.elapsed().as_millis() as u64;
+
+        // 6. Parse structured elements from model response
+        let detection = parse_elements_from_vision_response(
+            &vision_response.description,
+            query.clone(),
+            elapsed,
+        );
+
+        // 7. Apply confidence filter
+        let filtered_elements: Vec<serde_json::Value> = detection
+            .elements
+            .iter()
+            .filter(|e| e.confidence >= min_confidence)
+            .map(|e| serde_json::to_value(e).unwrap_or(serde_json::Value::Null))
+            .collect();
+
+        let element_count = filtered_elements.len();
+
+        info!(
+            tool = "detect_screen_elements",
+            element_count,
+            is_limited = detection.is_limited(),
+            latency_ms = elapsed,
+            "Screen element detection completed"
+        );
+
+        // 8. Build result data
+        let mut data = serde_json::json!({
+            "elements": filtered_elements,
+            "element_count": element_count,
+            "query": query,
+            "latency_ms": elapsed
+        });
+
+        if let Some(limitation) = &detection.detection_limitation {
+            data["detection_limitation"] = serde_json::Value::String(limitation.clone());
+        }
+
+        if let Some(raw) = &detection.raw_description {
+            data["raw_description"] = serde_json::Value::String(raw.clone());
+        }
+
+        Ok(ToolResult::success(
+            request.request_id,
+            self.definition.id.clone(),
+            data,
+            elapsed,
+        ))
+    }
+}
+
+// ============================================================
+// UI Automation Inspection Tool (M08.04)
+// ============================================================
+
+/// Tool that inspects the active foreground application window using native
+/// Windows UI Automation (accessibility tree) to locate UI elements and exact bounding boxes.
+pub struct InspectUiTreeTool {
+    definition: ToolDefinition,
+}
+
+impl InspectUiTreeTool {
+    pub fn new() -> Self {
+        Self {
+            definition: ToolDefinition {
+                id: "inspect_ui_tree".to_string(),
+                name: "Inspect UI Tree".to_string(),
+                description: "Inspects the active foreground application window using Windows UI Automation to discover accessible UI elements (buttons, text inputs, links, menus, tabs, etc.) with exact OS bounding rectangles and metadata. Use for queries like 'inspect the UI', 'find the Soft Reset button', 'where is the search box'. Does NOT perform any mouse or click interaction.".to_string(),
+                parameters_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Optional search filter matching element name, control type, or automation ID (e.g. 'Soft Reset', 'button', 'text input')"
+                        },
+                        "max_depth": {
+                            "type": "integer",
+                            "description": "Maximum tree traversal depth (default: 8)"
+                        },
+                        "max_elements": {
+                            "type": "integer",
+                            "description": "Maximum elements to return (default: 100)"
+                        }
+                    }
+                }),
+                risk_level: RiskLevel::Low,
+                required_permissions: vec!["accessibility".to_string(), "ui_automation".to_string()],
+                timeout_secs: 30,
+            },
+        }
+    }
+}
+
+impl Default for InspectUiTreeTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl Tool for InspectUiTreeTool {
+    fn definition(&self) -> &ToolDefinition {
+        &self.definition
+    }
+
+    async fn execute(
+        &self,
+        request: ToolRequest,
+        ctx: &ToolExecutionContext,
+    ) -> Result<ToolResult, ToolError> {
+        let start = Instant::now();
+
+        let query = request
+            .arguments
+            .get("query")
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+
+        let max_depth = request
+            .arguments
+            .get("max_depth")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as usize)
+            .unwrap_or(8);
+
+        let max_elements = request
+            .arguments
+            .get("max_elements")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as usize)
+            .unwrap_or(100);
+
+        let uia_result = ctx
+            .platform_adapter
+            .inspect_ui_tree(query.as_deref(), max_depth, max_elements)
+            .await
+            .map_err(|e| ToolError::ExecutionFailed {
+                tool: self.definition.id.clone(),
+                cause: format!("Windows UI Automation inspection failed: {}", e),
+            })?;
+
+        let elapsed = start.elapsed().as_millis() as u64;
+        let element_count = uia_result.elements.len();
+
+        info!(
+            tool = "inspect_ui_tree",
+            window_title = %uia_result.window_title,
+            element_count,
+            total_scanned = uia_result.total_elements_scanned,
+            latency_ms = elapsed,
+            "UI Automation inspection completed"
+        );
+
+        let elements_json: Vec<serde_json::Value> = uia_result
+            .elements
+            .iter()
+            .map(|e| serde_json::to_value(e).unwrap_or(serde_json::Value::Null))
+            .collect();
+
+        let data = json!({
+            "window": {
+                "title": uia_result.window_title,
+                "process_name": uia_result.process_name
+            },
+            "elements": elements_json,
+            "element_count": element_count,
+            "total_elements_scanned": uia_result.total_elements_scanned,
+            "is_truncated": uia_result.is_truncated,
+            "query": query,
+            "source": uia_result.source,
+            "latency_ms": elapsed
+        });
+
+        Ok(ToolResult::success(
+            request.request_id,
+            self.definition.id.clone(),
+            data,
+            elapsed,
+        ))
+    }
+}
+
+// ============================================================
+// Browser Session Management Tools (M09.01)
+// ============================================================
+
+use jarvis_browser::{BrowserNavigationRequest, BrowserProvider, BrowserType, PlatformBrowserProvider};
+
+/// Tool to inspect browser detection, window, and session state.
+pub struct GetBrowserStatusTool {
+    definition: ToolDefinition,
+    browser_provider: Option<Arc<dyn BrowserProvider>>,
+}
+
+impl GetBrowserStatusTool {
+    pub fn new() -> Self {
+        Self {
+            definition: ToolDefinition {
+                id: "browser_status".to_string(),
+                name: "Browser Status".to_string(),
+                description: "Detects whether a web browser (e.g. Chrome, Edge, Firefox, Brave) is running, inspects process/window count, foreground status, active page title, and session metadata.".to_string(),
+                parameters_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "browser": {
+                            "type": "string",
+                            "description": "Browser to check (default: 'Chrome')"
+                        }
+                    }
+                }),
+                risk_level: RiskLevel::Low,
+                required_permissions: vec!["system_info".to_string(), "browser".to_string()],
+                timeout_secs: 15,
+            },
+            browser_provider: None,
+        }
+    }
+
+    pub fn with_browser_provider(provider: Arc<dyn BrowserProvider>) -> Self {
+        let mut tool = Self::new();
+        tool.browser_provider = Some(provider);
+        tool
+    }
+}
+
+impl Default for GetBrowserStatusTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl Tool for GetBrowserStatusTool {
+    fn definition(&self) -> &ToolDefinition {
+        &self.definition
+    }
+
+    async fn execute(
+        &self,
+        request: ToolRequest,
+        ctx: &ToolExecutionContext,
+    ) -> Result<ToolResult, ToolError> {
+        let start = Instant::now();
+
+        let browser_str = request
+            .arguments
+            .get("browser")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Chrome");
+
+        let browser_type = BrowserType::from_str(browser_str);
+
+        let provider: Arc<dyn BrowserProvider> = self.browser_provider.clone().unwrap_or_else(|| {
+            Arc::new(PlatformBrowserProvider::new(ctx.platform_adapter.clone()))
+        });
+
+        let status = provider
+            .detect_browser(browser_type.clone())
+            .await
+            .map_err(|e| ToolError::ExecutionFailed {
+                tool: self.definition.id.clone(),
+                cause: format!("Failed to detect browser status: {}", e),
+            })?;
+
+        let session = provider
+            .get_session_state(browser_type)
+            .await
+            .map_err(|e| ToolError::ExecutionFailed {
+                tool: self.definition.id.clone(),
+                cause: format!("Failed to get browser session state: {}", e),
+            })?;
+
+        let elapsed = start.elapsed().as_millis() as u64;
+
+        let data = json!({
+            "browser": status.browser_name,
+            "running": status.running,
+            "process_name": status.process_name,
+            "process_id": status.process_id,
+            "window_count": status.window_count,
+            "foreground": status.foreground,
+            "window_title": status.active_window_title,
+            "current_url": session.current_url,
+            "current_page_title": session.current_page_title,
+            "limitations": session.limitations,
+            "latency_ms": elapsed
+        });
+
+        Ok(ToolResult::success(
+            request.request_id,
+            self.definition.id.clone(),
+            data,
+            elapsed,
+        ))
+    }
+}
+
+/// Tool to launch a web browser session or reuse an existing session.
+pub struct OpenBrowserTool {
+    definition: ToolDefinition,
+    browser_provider: Option<Arc<dyn BrowserProvider>>,
+}
+
+impl OpenBrowserTool {
+    pub fn new() -> Self {
+        Self {
+            definition: ToolDefinition {
+                id: "open_browser".to_string(),
+                name: "Open Browser".to_string(),
+                description: "Launches a web browser (e.g. Chrome) or reuses an existing running browser session without launching duplicate processes, optionally navigating to an initial URL.".to_string(),
+                parameters_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "browser": {
+                            "type": "string",
+                            "description": "Browser name to open (default: 'Chrome')"
+                        },
+                        "url": {
+                            "type": "string",
+                            "description": "Optional initial URL to navigate to upon opening"
+                        }
+                    }
+                }),
+                risk_level: RiskLevel::Low,
+                required_permissions: vec!["process_management".to_string(), "browser".to_string()],
+                timeout_secs: 30,
+            },
+            browser_provider: None,
+        }
+    }
+
+    pub fn with_browser_provider(provider: Arc<dyn BrowserProvider>) -> Self {
+        let mut tool = Self::new();
+        tool.browser_provider = Some(provider);
+        tool
+    }
+}
+
+impl Default for OpenBrowserTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl Tool for OpenBrowserTool {
+    fn definition(&self) -> &ToolDefinition {
+        &self.definition
+    }
+
+    async fn execute(
+        &self,
+        request: ToolRequest,
+        ctx: &ToolExecutionContext,
+    ) -> Result<ToolResult, ToolError> {
+        let start = Instant::now();
+
+        let browser_str = request
+            .arguments
+            .get("browser")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Chrome");
+
+        let url_opt = request
+            .arguments
+            .get("url")
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty());
+
+        let browser_type = BrowserType::from_str(browser_str);
+
+        let provider: Arc<dyn BrowserProvider> = self.browser_provider.clone().unwrap_or_else(|| {
+            Arc::new(PlatformBrowserProvider::new(ctx.platform_adapter.clone()))
+        });
+
+        let status = provider
+            .launch_browser(browser_type.clone())
+            .await
+            .map_err(|e| ToolError::ExecutionFailed {
+                tool: self.definition.id.clone(),
+                cause: format!("Failed to open browser: {}", e),
+            })?;
+
+        let mut nav_result = None;
+        if let Some(target_url) = url_opt {
+            let nav_req = BrowserNavigationRequest {
+                url: target_url.to_string(),
+                browser: browser_type.clone(),
+                new_tab: false,
+            };
+            let res = provider.navigate(nav_req).await.map_err(|e| ToolError::ExecutionFailed {
+                tool: self.definition.id.clone(),
+                cause: format!("Browser launched but initial navigation failed: {}", e),
+            })?;
+            nav_result = Some(res);
+        }
+
+        let elapsed = start.elapsed().as_millis() as u64;
+
+        let mut data = json!({
+            "browser": status.browser_name,
+            "running": status.running,
+            "process_name": status.process_name,
+            "process_id": status.process_id,
+            "window_count": status.window_count,
+            "foreground": status.foreground,
+            "window_title": status.active_window_title,
+            "latency_ms": elapsed
+        });
+
+        if let Some(nav) = nav_result {
+            data["navigation"] = json!({
+                "success": nav.success,
+                "url": nav.url,
+                "message": nav.message
+            });
+        }
+
+        Ok(ToolResult::success(
+            request.request_id,
+            self.definition.id.clone(),
+            data,
+            elapsed,
+        ))
+    }
+}
+
+/// Tool to navigate an active browser session to a validated URL.
+pub struct NavigateBrowserTool {
+    definition: ToolDefinition,
+    browser_provider: Option<Arc<dyn BrowserProvider>>,
+}
+
+impl NavigateBrowserTool {
+    pub fn new() -> Self {
+        Self {
+            definition: ToolDefinition {
+                id: "browser_navigate".to_string(),
+                name: "Navigate Browser".to_string(),
+                description: "Navigates an active browser session to a specified URL (e.g. 'https://www.google.com', 'https://www.linkedin.com').".to_string(),
+                parameters_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "url": {
+                            "type": "string",
+                            "description": "URL to navigate to (e.g. 'https://www.google.com', 'linkedin.com')"
+                        },
+                        "browser": {
+                            "type": "string",
+                            "description": "Browser to navigate (default: 'Chrome')"
+                        },
+                        "new_tab": {
+                            "type": "boolean",
+                            "description": "Whether to open in a new tab"
+                        }
+                    },
+                    "required": ["url"]
+                }),
+                risk_level: RiskLevel::Low,
+                required_permissions: vec!["process_management".to_string(), "browser".to_string()],
+                timeout_secs: 30,
+            },
+            browser_provider: None,
+        }
+    }
+
+    pub fn with_browser_provider(provider: Arc<dyn BrowserProvider>) -> Self {
+        let mut tool = Self::new();
+        tool.browser_provider = Some(provider);
+        tool
+    }
+}
+
+impl Default for NavigateBrowserTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl Tool for NavigateBrowserTool {
+    fn definition(&self) -> &ToolDefinition {
+        &self.definition
+    }
+
+    async fn execute(
+        &self,
+        request: ToolRequest,
+        ctx: &ToolExecutionContext,
+    ) -> Result<ToolResult, ToolError> {
+        let start = Instant::now();
+
+        let raw_url = request
+            .arguments
+            .get("url")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ToolError::InvalidArguments {
+                tool: self.definition.id.clone(),
+                details: "Missing required argument 'url'".to_string(),
+            })?;
+
+        let browser_str = request
+            .arguments
+            .get("browser")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Chrome");
+
+        let new_tab = request
+            .arguments
+            .get("new_tab")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let browser_type = BrowserType::from_str(browser_str);
+
+        let provider: Arc<dyn BrowserProvider> = self.browser_provider.clone().unwrap_or_else(|| {
+            Arc::new(PlatformBrowserProvider::new(ctx.platform_adapter.clone()))
+        });
+
+        let nav_req = BrowserNavigationRequest {
+            url: raw_url.to_string(),
+            browser: browser_type,
+            new_tab,
+        };
+
+        let nav_result = provider
+            .navigate(nav_req)
+            .await
+            .map_err(|e| ToolError::ExecutionFailed {
+                tool: self.definition.id.clone(),
+                cause: format!("Browser navigation failed: {}", e),
+            })?;
+
+        let elapsed = start.elapsed().as_millis() as u64;
+
+        let data = json!({
+            "success": nav_result.success,
+            "url": nav_result.url,
+            "browser": nav_result.browser,
+            "message": nav_result.message,
+            "window_title": nav_result.window_title,
+            "latency_ms": elapsed
+        });
+
+        Ok(ToolResult::success(
+            request.request_id,
+            self.definition.id.clone(),
+            data,
+            elapsed,
+        ))
+    }
+}
+
+/// Tool to navigate backward in browser history.
+pub struct BrowserBackTool {
+    definition: ToolDefinition,
+    browser_provider: Option<Arc<dyn BrowserProvider>>,
+}
+
+impl BrowserBackTool {
+    pub fn new() -> Self {
+        Self {
+            definition: ToolDefinition {
+                id: "browser_back".to_string(),
+                name: "Browser Back".to_string(),
+                description: "Navigates backward in the active browser session history.".to_string(),
+                parameters_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "browser": { "type": "string", "description": "Browser name (default: 'Chrome')" }
+                    }
+                }),
+                risk_level: RiskLevel::Low,
+                required_permissions: vec!["browser".to_string()],
+                timeout_secs: 15,
+            },
+            browser_provider: None,
+        }
+    }
+
+    pub fn with_browser_provider(provider: Arc<dyn BrowserProvider>) -> Self {
+        let mut tool = Self::new();
+        tool.browser_provider = Some(provider);
+        tool
+    }
+}
+
+impl Default for BrowserBackTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl Tool for BrowserBackTool {
+    fn definition(&self) -> &ToolDefinition {
+        &self.definition
+    }
+
+    async fn execute(&self, request: ToolRequest, ctx: &ToolExecutionContext) -> Result<ToolResult, ToolError> {
+        let start = Instant::now();
+        let browser_str = request.arguments.get("browser").and_then(|v| v.as_str()).unwrap_or("Chrome");
+        let browser_type = BrowserType::from_str(browser_str);
+        let provider: Arc<dyn BrowserProvider> = self.browser_provider.clone().unwrap_or_else(|| {
+            Arc::new(PlatformBrowserProvider::new(ctx.platform_adapter.clone()))
+        });
+
+        let res = provider.back(browser_type).await.map_err(|e| ToolError::ExecutionFailed {
+            tool: self.definition.id.clone(),
+            cause: e.to_string(),
+        })?;
+
+        let elapsed = start.elapsed().as_millis() as u64;
+        Ok(ToolResult::success(request.request_id, self.definition.id.clone(), json!(res), elapsed))
+    }
+}
+
+/// Tool to navigate forward in browser history.
+pub struct BrowserForwardTool {
+    definition: ToolDefinition,
+    browser_provider: Option<Arc<dyn BrowserProvider>>,
+}
+
+impl BrowserForwardTool {
+    pub fn new() -> Self {
+        Self {
+            definition: ToolDefinition {
+                id: "browser_forward".to_string(),
+                name: "Browser Forward".to_string(),
+                description: "Navigates forward in the active browser session history.".to_string(),
+                parameters_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "browser": { "type": "string", "description": "Browser name (default: 'Chrome')" }
+                    }
+                }),
+                risk_level: RiskLevel::Low,
+                required_permissions: vec!["browser".to_string()],
+                timeout_secs: 15,
+            },
+            browser_provider: None,
+        }
+    }
+
+    pub fn with_browser_provider(provider: Arc<dyn BrowserProvider>) -> Self {
+        let mut tool = Self::new();
+        tool.browser_provider = Some(provider);
+        tool
+    }
+}
+
+impl Default for BrowserForwardTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl Tool for BrowserForwardTool {
+    fn definition(&self) -> &ToolDefinition {
+        &self.definition
+    }
+
+    async fn execute(&self, request: ToolRequest, ctx: &ToolExecutionContext) -> Result<ToolResult, ToolError> {
+        let start = Instant::now();
+        let browser_str = request.arguments.get("browser").and_then(|v| v.as_str()).unwrap_or("Chrome");
+        let browser_type = BrowserType::from_str(browser_str);
+        let provider: Arc<dyn BrowserProvider> = self.browser_provider.clone().unwrap_or_else(|| {
+            Arc::new(PlatformBrowserProvider::new(ctx.platform_adapter.clone()))
+        });
+
+        let res = provider.forward(browser_type).await.map_err(|e| ToolError::ExecutionFailed {
+            tool: self.definition.id.clone(),
+            cause: e.to_string(),
+        })?;
+
+        let elapsed = start.elapsed().as_millis() as u64;
+        Ok(ToolResult::success(request.request_id, self.definition.id.clone(), json!(res), elapsed))
+    }
+}
+
+/// Tool to reload the current page.
+pub struct BrowserReloadTool {
+    definition: ToolDefinition,
+    browser_provider: Option<Arc<dyn BrowserProvider>>,
+}
+
+impl BrowserReloadTool {
+    pub fn new() -> Self {
+        Self {
+            definition: ToolDefinition {
+                id: "browser_reload".to_string(),
+                name: "Browser Reload".to_string(),
+                description: "Reloads the active browser page.".to_string(),
+                parameters_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "browser": { "type": "string", "description": "Browser name (default: 'Chrome')" }
+                    }
+                }),
+                risk_level: RiskLevel::Low,
+                required_permissions: vec!["browser".to_string()],
+                timeout_secs: 15,
+            },
+            browser_provider: None,
+        }
+    }
+
+    pub fn with_browser_provider(provider: Arc<dyn BrowserProvider>) -> Self {
+        let mut tool = Self::new();
+        tool.browser_provider = Some(provider);
+        tool
+    }
+}
+
+impl Default for BrowserReloadTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl Tool for BrowserReloadTool {
+    fn definition(&self) -> &ToolDefinition {
+        &self.definition
+    }
+
+    async fn execute(&self, request: ToolRequest, ctx: &ToolExecutionContext) -> Result<ToolResult, ToolError> {
+        let start = Instant::now();
+        let browser_str = request.arguments.get("browser").and_then(|v| v.as_str()).unwrap_or("Chrome");
+        let browser_type = BrowserType::from_str(browser_str);
+        let provider: Arc<dyn BrowserProvider> = self.browser_provider.clone().unwrap_or_else(|| {
+            Arc::new(PlatformBrowserProvider::new(ctx.platform_adapter.clone()))
+        });
+
+        let res = provider.reload(browser_type).await.map_err(|e| ToolError::ExecutionFailed {
+            tool: self.definition.id.clone(),
+            cause: e.to_string(),
+        })?;
+
+        let elapsed = start.elapsed().as_millis() as u64;
+        Ok(ToolResult::success(request.request_id, self.definition.id.clone(), json!(res), elapsed))
+    }
+}
+
+/// Tool to inspect current page URL and title.
+pub struct BrowserCurrentPageTool {
+    definition: ToolDefinition,
+    browser_provider: Option<Arc<dyn BrowserProvider>>,
+}
+
+impl BrowserCurrentPageTool {
+    pub fn new() -> Self {
+        Self {
+            definition: ToolDefinition {
+                id: "browser_current_page".to_string(),
+                name: "Browser Current Page".to_string(),
+                description: "Gets the current URL and page title of the active browser session.".to_string(),
+                parameters_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "browser": { "type": "string", "description": "Browser name (default: 'Chrome')" }
+                    }
+                }),
+                risk_level: RiskLevel::Low,
+                required_permissions: vec!["browser".to_string()],
+                timeout_secs: 15,
+            },
+            browser_provider: None,
+        }
+    }
+
+    pub fn with_browser_provider(provider: Arc<dyn BrowserProvider>) -> Self {
+        let mut tool = Self::new();
+        tool.browser_provider = Some(provider);
+        tool
+    }
+}
+
+impl Default for BrowserCurrentPageTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl Tool for BrowserCurrentPageTool {
+    fn definition(&self) -> &ToolDefinition {
+        &self.definition
+    }
+
+    async fn execute(&self, request: ToolRequest, ctx: &ToolExecutionContext) -> Result<ToolResult, ToolError> {
+        let start = Instant::now();
+        let browser_str = request.arguments.get("browser").and_then(|v| v.as_str()).unwrap_or("Chrome");
+        let browser_type = BrowserType::from_str(browser_str);
+        let provider: Arc<dyn BrowserProvider> = self.browser_provider.clone().unwrap_or_else(|| {
+            Arc::new(PlatformBrowserProvider::new(ctx.platform_adapter.clone()))
+        });
+
+        let session = provider.get_session_state(browser_type.clone()).await.map_err(|e| ToolError::ExecutionFailed {
+            tool: self.definition.id.clone(),
+            cause: e.to_string(),
+        })?;
+
+        let elapsed = start.elapsed().as_millis() as u64;
+        let data = json!({
+            "browser": session.browser,
+            "running": session.running,
+            "current_url": session.current_url,
+            "current_page_title": session.current_page_title,
+            "active_window": session.active_window,
+            "latency_ms": elapsed
+        });
+
+        Ok(ToolResult::success(request.request_id, self.definition.id.clone(), data, elapsed))
+    }
+}
+
+/// Tool to list open browser tabs.
+pub struct BrowserListTabsTool {
+    definition: ToolDefinition,
+    browser_provider: Option<Arc<dyn BrowserProvider>>,
+}
+
+impl BrowserListTabsTool {
+    pub fn new() -> Self {
+        Self {
+            definition: ToolDefinition {
+                id: "browser_list_tabs".to_string(),
+                name: "Browser List Tabs".to_string(),
+                description: "Lists all open tabs in the active browser session.".to_string(),
+                parameters_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "browser": { "type": "string", "description": "Browser name (default: 'Chrome')" }
+                    }
+                }),
+                risk_level: RiskLevel::Low,
+                required_permissions: vec!["browser".to_string()],
+                timeout_secs: 15,
+            },
+            browser_provider: None,
+        }
+    }
+
+    pub fn with_browser_provider(provider: Arc<dyn BrowserProvider>) -> Self {
+        let mut tool = Self::new();
+        tool.browser_provider = Some(provider);
+        tool
+    }
+}
+
+impl Default for BrowserListTabsTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl Tool for BrowserListTabsTool {
+    fn definition(&self) -> &ToolDefinition {
+        &self.definition
+    }
+
+    async fn execute(&self, request: ToolRequest, ctx: &ToolExecutionContext) -> Result<ToolResult, ToolError> {
+        let start = Instant::now();
+        let browser_str = request.arguments.get("browser").and_then(|v| v.as_str()).unwrap_or("Chrome");
+        let browser_type = BrowserType::from_str(browser_str);
+        let provider: Arc<dyn BrowserProvider> = self.browser_provider.clone().unwrap_or_else(|| {
+            Arc::new(PlatformBrowserProvider::new(ctx.platform_adapter.clone()))
+        });
+
+        let tabs = provider.list_tabs(browser_type.clone()).await.map_err(|e| ToolError::ExecutionFailed {
+            tool: self.definition.id.clone(),
+            cause: e.to_string(),
+        })?;
+
+        let elapsed = start.elapsed().as_millis() as u64;
+        let data = json!({
+            "browser": browser_type.name(),
+            "tab_count": tabs.len(),
+            "tabs": tabs,
+            "latency_ms": elapsed
+        });
+
+        Ok(ToolResult::success(request.request_id, self.definition.id.clone(), data, elapsed))
+    }
+}
+
+/// Tool to open a new browser tab.
+pub struct BrowserNewTabTool {
+    definition: ToolDefinition,
+    browser_provider: Option<Arc<dyn BrowserProvider>>,
+}
+
+impl BrowserNewTabTool {
+    pub fn new() -> Self {
+        Self {
+            definition: ToolDefinition {
+                id: "browser_new_tab".to_string(),
+                name: "Browser New Tab".to_string(),
+                description: "Opens a new browser tab, optionally navigating to an initial URL.".to_string(),
+                parameters_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "url": { "type": "string", "description": "Optional initial URL" },
+                        "browser": { "type": "string", "description": "Browser name (default: 'Chrome')" }
+                    }
+                }),
+                risk_level: RiskLevel::Low,
+                required_permissions: vec!["browser".to_string()],
+                timeout_secs: 20,
+            },
+            browser_provider: None,
+        }
+    }
+
+    pub fn with_browser_provider(provider: Arc<dyn BrowserProvider>) -> Self {
+        let mut tool = Self::new();
+        tool.browser_provider = Some(provider);
+        tool
+    }
+}
+
+impl Default for BrowserNewTabTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl Tool for BrowserNewTabTool {
+    fn definition(&self) -> &ToolDefinition {
+        &self.definition
+    }
+
+    async fn execute(&self, request: ToolRequest, ctx: &ToolExecutionContext) -> Result<ToolResult, ToolError> {
+        let start = Instant::now();
+        let browser_str = request.arguments.get("browser").and_then(|v| v.as_str()).unwrap_or("Chrome");
+        let url_opt = request.arguments.get("url").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let browser_type = BrowserType::from_str(browser_str);
+        let provider: Arc<dyn BrowserProvider> = self.browser_provider.clone().unwrap_or_else(|| {
+            Arc::new(PlatformBrowserProvider::new(ctx.platform_adapter.clone()))
+        });
+
+        let tab = provider.new_tab(browser_type.clone(), url_opt).await.map_err(|e| ToolError::ExecutionFailed {
+            tool: self.definition.id.clone(),
+            cause: e.to_string(),
+        })?;
+
+        let elapsed = start.elapsed().as_millis() as u64;
+        let data = json!({
+            "browser": browser_type.name(),
+            "tab": tab,
+            "latency_ms": elapsed
+        });
+
+        Ok(ToolResult::success(request.request_id, self.definition.id.clone(), data, elapsed))
+    }
+}
+
+/// Tool to switch to a specific browser tab by index or title.
+pub struct BrowserSwitchTabTool {
+    definition: ToolDefinition,
+    browser_provider: Option<Arc<dyn BrowserProvider>>,
+}
+
+impl BrowserSwitchTabTool {
+    pub fn new() -> Self {
+        Self {
+            definition: ToolDefinition {
+                id: "browser_switch_tab".to_string(),
+                name: "Browser Switch Tab".to_string(),
+                description: "Switches to an open browser tab by 1-based index or title substring.".to_string(),
+                parameters_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "tab_index": { "type": "integer", "description": "1-based tab index (e.g. 1, 2, 3)" },
+                        "title": { "type": "string", "description": "Tab title search query" },
+                        "browser": { "type": "string", "description": "Browser name (default: 'Chrome')" }
+                    }
+                }),
+                risk_level: RiskLevel::Low,
+                required_permissions: vec!["browser".to_string()],
+                timeout_secs: 15,
+            },
+            browser_provider: None,
+        }
+    }
+
+    pub fn with_browser_provider(provider: Arc<dyn BrowserProvider>) -> Self {
+        let mut tool = Self::new();
+        tool.browser_provider = Some(provider);
+        tool
+    }
+}
+
+impl Default for BrowserSwitchTabTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl Tool for BrowserSwitchTabTool {
+    fn definition(&self) -> &ToolDefinition {
+        &self.definition
+    }
+
+    async fn execute(&self, request: ToolRequest, ctx: &ToolExecutionContext) -> Result<ToolResult, ToolError> {
+        let start = Instant::now();
+        let browser_str = request.arguments.get("browser").and_then(|v| v.as_str()).unwrap_or("Chrome");
+        let browser_type = BrowserType::from_str(browser_str);
+
+        let target = if let Some(idx) = request.arguments.get("tab_index").and_then(|v| v.as_u64()) {
+            TabTarget::Index(idx as usize)
+        } else if let Some(title) = request.arguments.get("title").and_then(|v| v.as_str()) {
+            TabTarget::Title(title.to_string())
+        } else {
+            return Err(ToolError::InvalidArguments {
+                tool: self.definition.id.clone(),
+                details: "Must specify either 'tab_index' or 'title'".to_string(),
+            });
+        };
+
+        let provider: Arc<dyn BrowserProvider> = self.browser_provider.clone().unwrap_or_else(|| {
+            Arc::new(PlatformBrowserProvider::new(ctx.platform_adapter.clone()))
+        });
+
+        let tab = provider.switch_tab(browser_type.clone(), target).await.map_err(|e| ToolError::ExecutionFailed {
+            tool: self.definition.id.clone(),
+            cause: e.to_string(),
+        })?;
+
+        let elapsed = start.elapsed().as_millis() as u64;
+        let data = json!({
+            "browser": browser_type.name(),
+            "tab": tab,
+            "latency_ms": elapsed
+        });
+
+        Ok(ToolResult::success(request.request_id, self.definition.id.clone(), data, elapsed))
+    }
+}
+
+/// Tool to close the current or specified browser tab.
+pub struct BrowserCloseTabTool {
+    definition: ToolDefinition,
+    browser_provider: Option<Arc<dyn BrowserProvider>>,
+}
+
+impl BrowserCloseTabTool {
+    pub fn new() -> Self {
+        Self {
+            definition: ToolDefinition {
+                id: "browser_close_tab".to_string(),
+                name: "Browser Close Tab".to_string(),
+                description: "Closes the current or specified browser tab.".to_string(),
+                parameters_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "tab_index": { "type": "integer", "description": "Optional 1-based tab index" },
+                        "browser": { "type": "string", "description": "Browser name (default: 'Chrome')" }
+                    }
+                }),
+                risk_level: RiskLevel::Low,
+                required_permissions: vec!["browser".to_string()],
+                timeout_secs: 15,
+            },
+            browser_provider: None,
+        }
+    }
+
+    pub fn with_browser_provider(provider: Arc<dyn BrowserProvider>) -> Self {
+        let mut tool = Self::new();
+        tool.browser_provider = Some(provider);
+        tool
+    }
+}
+
+impl Default for BrowserCloseTabTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl Tool for BrowserCloseTabTool {
+    fn definition(&self) -> &ToolDefinition {
+        &self.definition
+    }
+
+    async fn execute(&self, request: ToolRequest, ctx: &ToolExecutionContext) -> Result<ToolResult, ToolError> {
+        let start = Instant::now();
+        let browser_str = request.arguments.get("browser").and_then(|v| v.as_str()).unwrap_or("Chrome");
+        let browser_type = BrowserType::from_str(browser_str);
+
+        let target = request.arguments.get("tab_index").and_then(|v| v.as_u64()).map(|idx| TabTarget::Index(idx as usize));
+
+        let provider: Arc<dyn BrowserProvider> = self.browser_provider.clone().unwrap_or_else(|| {
+            Arc::new(PlatformBrowserProvider::new(ctx.platform_adapter.clone()))
+        });
+
+        let res = provider.close_tab(browser_type, target).await.map_err(|e| ToolError::ExecutionFailed {
+            tool: self.definition.id.clone(),
+            cause: e.to_string(),
+        })?;
+
+        let elapsed = start.elapsed().as_millis() as u64;
+        Ok(ToolResult::success(request.request_id, self.definition.id.clone(), json!(res), elapsed))
+    }
+}
+
+// ============================================================
 // Tool Registry
 // ============================================================
 
@@ -2507,6 +4204,22 @@ impl ToolRegistry {
         registry.register(Box::new(GetClipboardTool::new()));
         registry.register(Box::new(SetClipboardTool::new()));
         registry.register(Box::new(ShowNotificationTool::new()));
+        registry.register(Box::new(DescribeScreenTool::new()));
+        registry.register(Box::new(ReadScreenTextTool::new()));
+        registry.register(Box::new(ReadScreenTool::new()));
+        registry.register(Box::new(DetectScreenElementsTool::new()));
+        registry.register(Box::new(InspectUiTreeTool::new()));
+        registry.register(Box::new(GetBrowserStatusTool::new()));
+        registry.register(Box::new(OpenBrowserTool::new()));
+        registry.register(Box::new(NavigateBrowserTool::new()));
+        registry.register(Box::new(BrowserBackTool::new()));
+        registry.register(Box::new(BrowserForwardTool::new()));
+        registry.register(Box::new(BrowserReloadTool::new()));
+        registry.register(Box::new(BrowserCurrentPageTool::new()));
+        registry.register(Box::new(BrowserListTabsTool::new()));
+        registry.register(Box::new(BrowserNewTabTool::new()));
+        registry.register(Box::new(BrowserSwitchTabTool::new()));
+        registry.register(Box::new(BrowserCloseTabTool::new()));
         registry
     }
 
@@ -2557,6 +4270,7 @@ impl Default for ToolRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use jarvis_ai::{MockOcrProvider, MockVisionProvider};
     use jarvis_platform::*;
 
     // Mock platform adapter for testing
@@ -2631,7 +4345,7 @@ mod tests {
         }
         async fn take_screenshot(&self) -> anyhow::Result<Screenshot> {
             Ok(Screenshot {
-                data: vec![],
+                data: vec![1, 2, 3, 4],
                 format: ImageFormat::Png,
                 width: 100,
                 height: 100,
@@ -2932,4 +4646,304 @@ mod tests {
         assert_eq!(result.data["message_length"], 27);
         assert!(result.data["notification_id"].is_string());
     }
+
+    #[tokio::test]
+    async fn test_describe_screen_tool_success_with_mock_provider() {
+        let registry = ToolRegistry::with_builtins();
+        assert!(registry.get("describe_screen").is_some());
+
+        let mock_vision = Arc::new(MockVisionProvider::new().with_canned_description("Desktop contains Chrome and VSCode"));
+        let tool = DescribeScreenTool::with_provider(mock_vision);
+        let adapter = Arc::new(MockPlatformAdapter::new(false));
+        let ctx = ToolExecutionContext::new(adapter);
+
+        let req = ToolRequest::new("describe_screen", json!({ "prompt": "What do you see?" }));
+        let result = tool.execute(req, &ctx).await.unwrap();
+
+        assert!(result.success);
+        assert_eq!(result.data["description"], "Desktop contains Chrome and VSCode");
+        assert_eq!(result.data["model_id"], "mock-vision-model");
+    }
+
+    #[tokio::test]
+    async fn test_describe_screen_tool_default_prompt() {
+        let mock_vision = Arc::new(MockVisionProvider::new().with_canned_description("Clean desktop overview"));
+        let tool = DescribeScreenTool::with_provider(mock_vision);
+        let adapter = Arc::new(MockPlatformAdapter::new(false));
+        let ctx = ToolExecutionContext::new(adapter);
+
+        let req = ToolRequest::new("describe_screen", json!({}));
+        let result = tool.execute(req, &ctx).await.unwrap();
+
+        assert!(result.success);
+        assert_eq!(result.data["description"], "Clean desktop overview");
+    }
+
+    #[tokio::test]
+    async fn test_describe_screen_tool_failure_propagation() {
+        let failing_vision = Arc::new(MockVisionProvider::new().with_failing(true));
+        let tool = DescribeScreenTool::with_provider(failing_vision);
+        let adapter = Arc::new(MockPlatformAdapter::new(false));
+        let ctx = ToolExecutionContext::new(adapter);
+
+        let req = ToolRequest::new("describe_screen", json!({}));
+        let result = tool.execute(req, &ctx).await.unwrap();
+
+        assert!(!result.success);
+        assert!(result.error.unwrap().contains("Mock vision provider is configured to fail"));
+    }
+
+    #[tokio::test]
+    async fn test_read_screen_text_tool_success_with_mock_ocr() {
+        let registry = ToolRegistry::with_builtins();
+        assert!(registry.get("read_screen_text").is_some());
+
+        let mock_ocr = Arc::new(MockOcrProvider::new().with_canned_text("JARVIS OCR TEST 12345"));
+        let tool = ReadScreenTextTool::with_provider(mock_ocr);
+        let adapter = Arc::new(MockPlatformAdapter::new(false));
+        let ctx = ToolExecutionContext::new(adapter);
+
+        let req = ToolRequest::new("read_screen_text", json!({}));
+        let result = tool.execute(req, &ctx).await.unwrap();
+
+        assert!(result.success);
+        assert_eq!(result.data["text"], "JARVIS OCR TEST 12345");
+        assert_eq!(result.data["has_text"], true);
+        assert_eq!(result.data["char_count"], 21);
+    }
+
+    #[tokio::test]
+    async fn test_read_screen_text_tool_empty_ocr_result() {
+        let mock_ocr = Arc::new(MockOcrProvider::new().with_canned_text("   "));
+        let tool = ReadScreenTextTool::with_provider(mock_ocr);
+        let adapter = Arc::new(MockPlatformAdapter::new(false));
+        let ctx = ToolExecutionContext::new(adapter);
+
+        let req = ToolRequest::new("read_screen_text", json!({}));
+        let result = tool.execute(req, &ctx).await.unwrap();
+
+        assert!(result.success);
+        assert_eq!(result.data["text"], "");
+        assert_eq!(result.data["has_text"], false);
+        assert_eq!(result.data["char_count"], 0);
+    }
+
+    #[tokio::test]
+    async fn test_read_screen_text_tool_failure_propagation() {
+        let failing_ocr = Arc::new(MockOcrProvider::new().with_failing(true));
+        let tool = ReadScreenTextTool::with_provider(failing_ocr);
+        let adapter = Arc::new(MockPlatformAdapter::new(false));
+        let ctx = ToolExecutionContext::new(adapter);
+
+        let req = ToolRequest::new("read_screen_text", json!({}));
+        let result = tool.execute(req, &ctx).await.unwrap();
+
+        assert!(!result.success);
+        assert!(result.error.unwrap().contains("Mock OCR provider configured to fail"));
+    }
+
+    // ===================================================
+    // ReadScreenTool (canonical "read_screen") unit tests
+    // ===================================================
+
+    #[test]
+    fn test_read_screen_tool_registration() {
+        let registry = ToolRegistry::with_builtins();
+        assert!(
+            registry.get("read_screen").is_some(),
+            "read_screen must be registered in ToolRegistry::with_builtins()"
+        );
+    }
+
+    #[test]
+    fn test_read_screen_tool_schema_validation() {
+        let tool = ReadScreenTool::new();
+        let def = tool.definition();
+        assert_eq!(def.id, "read_screen");
+        assert_eq!(def.name, "Read Screen");
+        assert_eq!(def.risk_level, RiskLevel::Low);
+        assert!(def.required_permissions.contains(&"screen_capture".to_string()));
+        assert!(def.required_permissions.contains(&"ocr".to_string()));
+        let schema = &def.parameters_schema;
+        assert_eq!(schema["type"], "object");
+        assert!(schema["properties"]["language"].is_object());
+    }
+
+    #[tokio::test]
+    async fn test_read_screen_tool_success_with_mock_ocr() {
+        let mock_ocr = Arc::new(MockOcrProvider::new().with_canned_text(
+            "JARVIS OCR TEST\nSYSTEM STATUS: ONLINE\nCPU: 42 PERCENT",
+        ));
+        let tool = ReadScreenTool::with_provider(mock_ocr);
+        let adapter = Arc::new(MockPlatformAdapter::new(false));
+        let ctx = ToolExecutionContext::new(adapter);
+
+        let req = ToolRequest::new("read_screen", json!({}));
+        let result = tool.execute(req, &ctx).await.unwrap();
+
+        assert!(result.success);
+        assert!(result.data["text"].as_str().unwrap().contains("JARVIS OCR TEST"));
+        assert_eq!(result.data["has_text"], true);
+        assert!(result.data["char_count"].as_u64().unwrap() > 0);
+    }
+
+    #[tokio::test]
+    async fn test_read_screen_tool_full_acceptance_text() {
+        let canned = "JARVIS OCR TEST\nSYSTEM STATUS: ONLINE\nCPU: 42 PERCENT\nMEMORY: 61 PERCENT\nTEST NUMBER: 12345";
+        let mock_ocr = Arc::new(MockOcrProvider::new().with_canned_text(canned));
+        let tool = ReadScreenTool::with_provider(mock_ocr);
+        let adapter = Arc::new(MockPlatformAdapter::new(false));
+        let ctx = ToolExecutionContext::new(adapter);
+
+        let req = ToolRequest::new("read_screen", json!({}));
+        let result = tool.execute(req, &ctx).await.unwrap();
+
+        assert!(result.success);
+        let text = result.data["text"].as_str().unwrap();
+        assert!(text.contains("JARVIS OCR TEST"));
+        assert!(text.contains("SYSTEM STATUS: ONLINE"));
+        assert!(text.contains("CPU: 42 PERCENT"));
+        assert!(text.contains("MEMORY: 61 PERCENT"));
+        assert!(text.contains("TEST NUMBER: 12345"));
+    }
+
+    #[tokio::test]
+    async fn test_read_screen_tool_empty_ocr_result() {
+        let mock_ocr = Arc::new(MockOcrProvider::new().with_canned_text("   "));
+        let tool = ReadScreenTool::with_provider(mock_ocr);
+        let adapter = Arc::new(MockPlatformAdapter::new(false));
+        let ctx = ToolExecutionContext::new(adapter);
+
+        let req = ToolRequest::new("read_screen", json!({}));
+        let result = tool.execute(req, &ctx).await.unwrap();
+
+        assert!(result.success);
+        assert_eq!(result.data["text"], "");
+        assert_eq!(result.data["has_text"], false);
+        assert_eq!(result.data["char_count"], 0);
+    }
+
+    #[tokio::test]
+    async fn test_read_screen_tool_failure_propagation() {
+        let failing_ocr = Arc::new(MockOcrProvider::new().with_failing(true));
+        let tool = ReadScreenTool::with_provider(failing_ocr);
+        let adapter = Arc::new(MockPlatformAdapter::new(false));
+        let ctx = ToolExecutionContext::new(adapter);
+
+        let req = ToolRequest::new("read_screen", json!({}));
+        let result = tool.execute(req, &ctx).await.unwrap();
+
+        assert!(!result.success);
+        assert!(result.error.unwrap().contains("Mock OCR provider configured to fail"));
+    }
+
+    #[test]
+    fn test_read_screen_tool_id_and_read_screen_text_are_distinct() {
+        let registry = ToolRegistry::with_builtins();
+        // Both tools must be registered independently
+        assert!(registry.get("read_screen").is_some());
+        assert!(registry.get("read_screen_text").is_some());
+        // They must have distinct IDs
+        let rs = registry.get("read_screen").unwrap();
+        let rst = registry.get("read_screen_text").unwrap();
+        assert_eq!(rs.definition().id, "read_screen");
+        assert_eq!(rst.definition().id, "read_screen_text");
+    }
+
+    #[test]
+    fn test_detect_screen_elements_tool_registered() {
+        let registry = ToolRegistry::with_builtins();
+        let tool = registry.get("detect_screen_elements");
+        assert!(tool.is_some());
+        assert_eq!(tool.unwrap().definition().id, "detect_screen_elements");
+    }
+
+    #[tokio::test]
+    async fn test_detect_screen_elements_tool_execute_with_mock_vision() {
+        let adapter = Arc::new(MockPlatformAdapter::new(false));
+        let mock_vision = Arc::new(MockVisionProvider::new().with_canned_description(
+            "{\"elements\": [{\"type\": \"button\", \"label\": \"Submit\", \"x\": 100, \"y\": 200, \"width\": 80, \"height\": 30, \"center_x\": 140, \"center_y\": 215, \"confidence\": 0.9}]}"
+        ));
+        let tool = DetectScreenElementsTool::with_vision_provider(mock_vision);
+        let ctx = ToolExecutionContext::new(adapter);
+
+        let req = ToolRequest::new("detect_screen_elements", json!({ "query": "find the Submit button" }));
+        let result = tool.execute(req, &ctx).await.unwrap();
+
+        assert!(result.success);
+        let data = result.data;
+        assert_eq!(data["element_count"], 1);
+        assert_eq!(data["query"], "find the Submit button");
+    }
+
+    #[test]
+    fn test_inspect_ui_tree_tool_registered() {
+        let registry = ToolRegistry::with_builtins();
+        let tool = registry.get("inspect_ui_tree");
+        assert!(tool.is_some());
+        assert_eq!(tool.unwrap().definition().id, "inspect_ui_tree");
+    }
+
+    #[tokio::test]
+    async fn test_inspect_ui_tree_tool_execute() {
+        let adapter = Arc::new(MockPlatformAdapter::new(false));
+        let tool = InspectUiTreeTool::new();
+        let ctx = ToolExecutionContext::new(adapter);
+
+        let req = ToolRequest::new("inspect_ui_tree", json!({ "query": "Soft Reset" }));
+        let result = tool.execute(req, &ctx).await.unwrap();
+
+        assert!(result.success);
+        let data = result.data;
+        assert_eq!(data["query"], "Soft Reset");
+        assert_eq!(data["source"], "WindowsUIAutomation");
+    }
+
+    #[tokio::test]
+    async fn test_m09_02_browser_tools_registration_and_execution() {
+        use jarvis_browser::MockBrowserProvider;
+
+        let registry = ToolRegistry::with_builtins();
+        let expected_tools = [
+            "browser_back",
+            "browser_forward",
+            "browser_reload",
+            "browser_current_page",
+            "browser_list_tabs",
+            "browser_new_tab",
+            "browser_switch_tab",
+            "browser_close_tab",
+        ];
+
+        for id in &expected_tools {
+            assert!(registry.get(id).is_some(), "Tool {} should be registered in ToolRegistry::with_builtins()", id);
+        }
+
+        let adapter = Arc::new(MockPlatformAdapter::new(false));
+        let ctx = ToolExecutionContext::new(adapter);
+        let mock_provider = Arc::new(MockBrowserProvider::new().with_running(true, 9999, "Google Chrome"));
+
+        let back_tool = BrowserBackTool::with_browser_provider(mock_provider.clone());
+        let res_back = back_tool.execute(ToolRequest::new("browser_back", json!({})), &ctx).await.unwrap();
+        assert!(res_back.success);
+
+        let new_tab_tool = BrowserNewTabTool::with_browser_provider(mock_provider.clone());
+        let res_tab = new_tab_tool.execute(ToolRequest::new("browser_new_tab", json!({ "url": "wikipedia.org" })), &ctx).await.unwrap();
+        assert!(res_tab.success);
+
+        let list_tabs_tool = BrowserListTabsTool::with_browser_provider(mock_provider.clone());
+        let res_list = list_tabs_tool.execute(ToolRequest::new("browser_list_tabs", json!({})), &ctx).await.unwrap();
+        assert!(res_list.success);
+        assert_eq!(res_list.data["tab_count"], 2);
+
+        let switch_tab_tool = BrowserSwitchTabTool::with_browser_provider(mock_provider.clone());
+        let res_switch = switch_tab_tool.execute(ToolRequest::new("browser_switch_tab", json!({ "tab_index": 1 })), &ctx).await.unwrap();
+        assert!(res_switch.success);
+
+        let close_tab_tool = BrowserCloseTabTool::with_browser_provider(mock_provider.clone());
+        let res_close = close_tab_tool.execute(ToolRequest::new("browser_close_tab", json!({})), &ctx).await.unwrap();
+        assert!(res_close.success);
+    }
 }
+
+

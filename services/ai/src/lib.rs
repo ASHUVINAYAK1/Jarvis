@@ -21,16 +21,31 @@
 //! IMPLEMENTATION STATUS: Phase 4, Milestones M04.01 → M04.13
 
 pub mod gateway;
+pub mod ocr;
 pub mod provider;
 pub mod providers;
 pub mod router;
+pub mod screen_elements;
 pub mod types;
+pub mod vision;
 
 pub use gateway::ModelGateway;
+pub use ocr::{
+    MockOcrProvider, OcrConfig, OcrError, OcrProvider, OcrProviderType, OcrRequest, OcrResponse,
+    OcrTextRegion, TesseractOcrProvider,
+};
 pub use provider::ModelProvider;
 pub use providers::{LlamaCppProvider, MockModelProvider, OllamaProvider};
 pub use router::{ModelRouter, ModelRoutingConfig};
+pub use screen_elements::{
+    build_detection_prompt, parse_elements_from_vision_response, DetectionSource,
+    ElementDetectionRequest, ElementDetectionResult, ElementType, ScreenElement,
+};
 pub use types::*;
+pub use vision::{
+    MockVisionProvider, OllamaVisionProvider, VisionConfig, VisionImage, VisionImageFormat,
+    VisionModelProvider, VisionRequest, VisionResponse,
+};
 
 // ============================================================
 // Tests
@@ -134,5 +149,20 @@ mod tests {
         let health = provider.check_health().await.unwrap();
         assert!(!health.is_online);
         assert_eq!(health.provider_type, ModelProviderType::Ollama);
+    }
+
+    #[tokio::test]
+    async fn test_gateway_vision_integration() {
+        let mock_model_provider = Arc::new(MockModelProvider::new());
+        let router = Arc::new(ModelRouter::new(ModelRoutingConfig::default()).with_provider(mock_model_provider));
+        let gateway = ModelGateway::new(router);
+
+        let vision_provider = MockVisionProvider::new().with_canned_description("Screen contains Chrome browser window");
+        let img = VisionImage::from_png_bytes(vec![1, 2, 3, 4]);
+        let req = VisionRequest::new(img, "What is visible on the screen?");
+
+        let resp = gateway.analyze_image(&vision_provider, &req).await.unwrap();
+        assert_eq!(resp.description, "Screen contains Chrome browser window");
+        assert_eq!(resp.provider_type, ModelProviderType::Mock);
     }
 }

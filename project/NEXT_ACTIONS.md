@@ -1,31 +1,25 @@
 # JARVIS — Next Actions
 
-**Updated:** 2026-08-18 13:01 IST  
-**Current Phase:** Phase 05 TTS Audio Quality Repaired / Phase 06 Complete ✅ / Next: Phase 08 (Advanced Tooling)  
-**Current Status:** Piper TTS Audio Quality Repair (Distortion/Static Fix) Complete & Verified ✅
+**Updated:** 2026-08-18 18:45 IST  
+**Current Phase:** Phase 09 — Browser Automation Engine  
+**Current Status:** M09.02 Complete & Verified ✅ — M09.03 (DOM Element Finding & Interaction) is Next Target
 
 ---
 
 ## Immediate Next Actions
 
-### Priority 1 — Voice Subsystem Repair & Audio Stack (Phase 05 COMPLETE ✅)
-- [x] Piper TTS process execution & parse_audio_bytes helper ✅
-- [x] Piper TTS binary file I/O fix (--output_file temp_wav_path resolving stdout text-mode corruption) ✅
-- [x] Real CPAL audio speaker streaming & linear PCM resampler ✅
-- [x] Dependency injection in VoiceSessionController & Tauri backend ✅
+### Priority 1 — Phase 09 Browser Automation Engine
+- [x] M09.01 — Browser Session Management (`BrowserType`, `BrowserStatus`, `BrowserProvider` trait, `PlatformBrowserProvider`, `MockBrowserProvider`, `browser_status`, `open_browser`, `browser_navigate`, orchestrator intent routing, 12 live CLI tests verified) ✅
+- [x] M09.02 — Navigation and Tab Control (Back, forward, reload, current_page, list_tabs, new_tab, switch_tab, close_tab, 8 canonical tools, policy classification, orchestrator intent routing, spoken TTS synthesis, 12 live CLI tests verified) ✅
+- [ ] M09.03 — DOM Element Finding & Interaction
+- [ ] M09.04 — Form Filling
 
-### Priority 2 — Phase 06 Desktop Platform Foundation (100% COMPLETE ✅)
-- [x] M06.01 — PlatformAdapter Trait Definition ✅
-- [x] M06.02 — Windows Application Launcher ✅
-- [x] M06.03 — Desktop Window Management & Active Window Focus ✅
-- [x] M06.04 — Process Management (CloseApplication, ListProcesses, IsApplicationRunning) ✅
-- [x] M06.05 — Screenshot Capture (TakeScreenshotTool, Display & Region Capture) ✅
-- [x] M06.06 — Clipboard Read/Write (GetClipboardTool, SetClipboardTool) ✅
-- [x] M06.07 — Windows Notifications (ShowNotificationTool) ✅
-
-### Priority 3 — Advanced Tooling & Computer Use (Phase 08)
-- [ ] T08.01.001 — File system tool definitions (read_file, write_file, search_files)
-- [ ] T12.01.001 — Browser automation engine (Playwright / CDP integration)
+### Priority 2 — Completed Foundations (Phases 00–08 COMPLETE ✅)
+- [x] Phase 00–04 — Discovery, Build System, Protocol IPC, Supervisor, Model Gateway ✅
+- [x] Phase 05 — Voice Pipeline, Hands-free, STT, Piper TTS, CPAL Audio Output ✅
+- [x] Phase 06 — Platform Adapters, App Launcher, Windowing, Process Control, Screenshots, Clipboard, Notifications ✅
+- [x] Phase 07 — Tool Runtime & Vertical Slice 1 (Tool Trait, Registry, 36 Built-in Tools, Audit EventBus) ✅
+- [x] Phase 08 — Vision, OCR & Windows UI Automation (Moondream VLM, Tesseract OCR, Windows UIA Tree Inspection) ✅
 
 ---
 

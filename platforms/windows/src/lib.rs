@@ -12,6 +12,8 @@
 //!
 //! IMPLEMENTATION STATUS: Phase 6, Milestone M06.03 — Desktop Window Management & Active Window Focus
 
+pub mod uia;
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -1159,6 +1161,20 @@ $notification.Dispose()
             .await
             .map_err(|e| anyhow!("Failed to initiate system sleep: {}", e))?;
         Ok(())
+    }
+
+    async fn inspect_ui_tree(
+        &self,
+        query: Option<&str>,
+        max_depth: usize,
+        max_elements: usize,
+    ) -> Result<jarvis_platform::UiTreeResult> {
+        let query_owned = query.map(|s| s.to_string());
+        tokio::task::spawn_blocking(move || {
+            uia::inspect_active_window_uia(query_owned.as_deref(), max_depth, max_elements)
+        })
+        .await
+        .map_err(|e| anyhow!("UIA inspection task join error: {}", e))?
     }
 }
 

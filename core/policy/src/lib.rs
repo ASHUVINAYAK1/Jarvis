@@ -42,6 +42,7 @@ pub enum AutonomyLevel {
     Level5Full = 5,
 }
 
+#[allow(clippy::derivable_impls)]
 impl Default for AutonomyLevel {
     fn default() -> Self {
         AutonomyLevel::Level3Conservative
@@ -108,6 +109,17 @@ impl PolicyEngine {
         overrides.insert("show_notification".to_string(), RiskLevel::Low);
         overrides.insert("get_time".to_string(), RiskLevel::Low);
         overrides.insert("get_system_info".to_string(), RiskLevel::Low);
+        overrides.insert("browser_status".to_string(), RiskLevel::Low);
+        overrides.insert("open_browser".to_string(), RiskLevel::Low);
+        overrides.insert("browser_navigate".to_string(), RiskLevel::Low);
+        overrides.insert("browser_back".to_string(), RiskLevel::Low);
+        overrides.insert("browser_forward".to_string(), RiskLevel::Low);
+        overrides.insert("browser_reload".to_string(), RiskLevel::Low);
+        overrides.insert("browser_current_page".to_string(), RiskLevel::Low);
+        overrides.insert("browser_list_tabs".to_string(), RiskLevel::Low);
+        overrides.insert("browser_new_tab".to_string(), RiskLevel::Low);
+        overrides.insert("browser_switch_tab".to_string(), RiskLevel::Low);
+        overrides.insert("browser_close_tab".to_string(), RiskLevel::Low);
         overrides.insert("close_application".to_string(), RiskLevel::Medium);
         overrides.insert("delete_file".to_string(), RiskLevel::Critical);
 

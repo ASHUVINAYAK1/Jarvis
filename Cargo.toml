@@ -24,6 +24,7 @@ members = [
     "services/tools",
     "services/mesh",
     "services/ai",
+    "services/browser",
 
     # Platform adapters
     "platforms/windows",
