@@ -12,7 +12,7 @@ use jarvis_event_bus::{EventBus, JarvisEvent, VoiceEvent};
 use jarvis_logging::init_logging;
 use jarvis_orchestrator::{ExecutionOutcome, Orchestrator};
 use jarvis_platform::{PlatformAdapter, PlatformInfo};
-use jarvis_speech::{AudioCapture, VoiceSessionController};
+use jarvis_speech::{AudioCapture, AudioOutput, PiperConfig, PiperTtsEngine, TextToSpeech, VoiceSessionController};
 use jarvis_windows::WindowsPlatformAdapter;
 
 /// Managed state holding the JARVIS core orchestrator & voice controller
@@ -29,8 +29,40 @@ async fn execute_command(
     command: String,
     state: State<'_, Arc<Mutex<JarvisState>>>,
 ) -> Result<ExecutionOutcome, String> {
+    let command_text = command.trim();
+    if command_text.is_empty() {
+        return Err("Command string is empty".to_string());
+    }
+
+    let utterance_id = uuid::Uuid::new_v4().to_string();
+    info!(
+        utterance_id = %utterance_id,
+        command = %command_text,
+        "[FRONTEND IPC] Desktop IPC command received"
+    );
+
     let guard = state.lock().await;
-    let outcome = guard.orchestrator.execute_command(&command).await;
+    let outcome = guard.orchestrator.execute_command(command_text).await;
+    let voice_controller = guard.voice_controller.clone();
+
+    if let ExecutionOutcome::Success { ref spoken_response, ref tool_name, .. } = outcome {
+        info!(
+            utterance_id = %utterance_id,
+            tool_name = %tool_name,
+            spoken_response = %spoken_response,
+            "[FRONTEND IPC] Desktop IPC command executed successfully"
+        );
+        let spoken = spoken_response.clone();
+        tokio::spawn(async move {
+            let _ = voice_controller.speak_text(&spoken).await;
+        });
+    } else {
+        let vc = voice_controller.clone();
+        tokio::spawn(async move {
+            vc.reset_to_idle().await;
+        });
+    }
+
     Ok(outcome)
 }
 
@@ -126,7 +158,32 @@ pub fn run() {
     let platform = Arc::new(WindowsPlatformAdapter::new());
     let orchestrator = Arc::new(Orchestrator::new(platform.clone()));
     let event_bus = Arc::new(EventBus::new(256));
-    let voice_controller = Arc::new(VoiceSessionController::new(event_bus.clone()));
+
+    let tts_engine: Arc<dyn TextToSpeech> = match PiperConfig::discover() {
+        Ok(config) => {
+            info!(
+                executable = ?config.executable_path,
+                model = ?config.model_path,
+                "Piper TTS engine configured"
+            );
+            Arc::new(PiperTtsEngine::with_config(config))
+        }
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "Piper TTS engine unavailable — returning structured error if synthesis is requested"
+            );
+            Arc::new(PiperTtsEngine::default())
+        }
+    };
+
+    let audio_output = Arc::new(AudioOutput::new());
+    let voice_controller = Arc::new(
+        VoiceSessionController::new(event_bus.clone())
+            .with_tts(tts_engine)
+            .with_audio_output(audio_output)
+            .with_orchestrator(orchestrator.clone()),
+    );
     let audio_capture = Arc::new(AudioCapture::default_16k_mono());
 
     let jarvis_state = Arc::new(Mutex::new(JarvisState {

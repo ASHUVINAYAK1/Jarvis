@@ -21,7 +21,7 @@ pub use device::{AudioDeviceManager, DefaultAudioDeviceManager};
 pub use output::AudioOutput;
 pub use session::VoiceSessionController;
 pub use stt::{MockSttEngine, SpeechToText, WhisperSttEngine};
-pub use tts::{MockTtsEngine, PiperTtsEngine, TextToSpeech};
+pub use tts::{parse_audio_bytes, MockTtsEngine, PiperConfig, PiperTtsEngine, TextToSpeech};
 pub use types::*;
 pub use vad::{VadState, VoiceActivityDetector};
 pub use wakeword::{WakeWordDetector, WakeWordResult};
@@ -140,7 +140,8 @@ mod tests {
         let bus = Arc::new(EventBus::new(256));
         let mut rx = bus.subscribe();
 
-        let controller = VoiceSessionController::new(bus.clone());
+        let controller = VoiceSessionController::new(bus.clone())
+            .with_stt(Arc::new(MockSttEngine::new("open notepad")));
         assert_eq!(controller.current_state().await, VoiceSessionState::Idle);
 
         controller.trigger_wake_word().await.unwrap();
@@ -159,7 +160,7 @@ mod tests {
         };
 
         let response = controller.process_speech_utterance(chunk).await.unwrap();
-        assert!(response.contains("Processing query"));
+        assert!(!response.contains("Processing query"));
         assert_eq!(controller.current_state().await, VoiceSessionState::Idle);
     }
 }

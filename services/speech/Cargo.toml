@@ -24,6 +24,9 @@ reqwest = { workspace = true }
 # Workspace internal crate dependencies
 jarvis-event-bus = { path = "../../core/event-bus" }
 jarvis-ai = { path = "../ai" }
+jarvis-orchestrator = { path = "../../core/orchestrator" }
 
 [dev-dependencies]
 tokio = { workspace = true }
+jarvis-platform = { path = "../../crates/platform" }
+jarvis-windows = { path = "../../platforms/windows" }

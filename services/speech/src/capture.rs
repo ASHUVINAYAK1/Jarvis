@@ -146,6 +146,39 @@ impl AudioCapture {
                     err_fn,
                     None,
                 ),
+                cpal::SampleFormat::U16 => device.build_input_stream(
+                    &config.into(),
+                    move |data: &[u16], _: &_| {
+                        if !active_flag_clone.load(Ordering::SeqCst) {
+                            return;
+                        }
+                        let samples: Vec<f32> = data
+                            .iter()
+                            .map(|&s| (s as f32 - 32768.0) / 32768.0)
+                            .collect();
+                        let sum_sq: f32 = samples.iter().map(|s| s * s).sum();
+                        let rms = (sum_sq / samples.len().max(1) as f32).sqrt();
+                        let peak = samples.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
+
+                        if rms > 0.005 {
+                            info!(
+                                rms = format!("{:.4}", rms),
+                                peak = format!("{:.4}", peak),
+                                samples = samples.len(),
+                                "[MIC TEST] Live voice audio input detected!"
+                            );
+                        }
+
+                        let chunk = AudioChunk {
+                            samples,
+                            format: target_format,
+                            timestamp_ms: chrono::Utc::now().timestamp_millis() as u64,
+                        };
+                        let _ = tx_clone.try_send(chunk);
+                    },
+                    err_fn,
+                    None,
+                ),
                 sample_format => {
                     warn!(
                         ?sample_format,

@@ -250,6 +250,59 @@
    - Manual Windows Verification: Tested native notification toasts `"send me a notification saying hello from JARVIS"` and `"show a notification titled JARVIS saying Chrome has opened"`.
    - Regression Suites: 100% passing across app launcher, process management, window management, screenshot capture, and clipboard read/write.
 
+## Session 015 — 2026-08-18 (Phase 05 TTS Runtime Implementation & Real Audio Output Repair)
+
+**Phase:** 05 (Local Voice Pipeline & Audio Stack — REPAIRED & VERIFIED)  
+**Milestone:** M05.10 / M05.12 (Piper TTS & Real CPAL Audio Playback)  
+**Task:** TTS Runtime Implementation & Real Audio Output Repair  
+**Status:** COMPLETE & VERIFIED ✅
+
+1. **Piper Process Execution & Audio Parsing ([`services/speech/src/tts.rs`](file:///c:/Users/Admin/Desktop/my-projects/jarvis/services/speech/src/tts.rs)):**
+   - Implemented `PiperConfig` with deterministic discovery: explicit env vars (`JARVIS_PIPER_PATH`, `JARVIS_PIPER_MODEL`), local app paths (`%USERPROFILE%\.jarvis\piper\`), or system `PATH`.
+   - Updated `PiperTtsEngine::synthesize()` to safely spawn `piper` executable via `tokio::process::Command`, piping text through stdin and capturing stdout bytes.
+   - Implemented `parse_audio_bytes()` helper parsing both RIFF WAV headers and raw 16-bit LE PCM data into normalized float samples (`Vec<f32>`).
+   - Returns structured `SpeechError::TtsFailure` when Piper or voice model is missing/unconfigured, eliminating fake silent zero buffers.
+
+2. **Real Audio Output & Resampling ([`services/speech/src/output.rs`](file:///c:/Users/Admin/Desktop/my-projects/jarvis/services/speech/src/output.rs)):**
+   - Replaced simulated sleep loop in `AudioOutput::play()` with real CPAL device output streaming.
+   - Added `resample_pcm()` helper linear-interpolating input samples to match CPAL default output device sample rate (e.g. 44.1kHz or 48kHz) and channel count (mono/stereo).
+   - Executed CPAL stream inside dedicated OS thread avoiding async boundary Send issues on Windows.
+   - Maintained immediate barge-in cancellation (< 15ms latency) via `stop()`.
+
+3. **Desktop Dependency Injection ([`apps/desktop/src-tauri/src/lib.rs`](file:///c:/Users/Admin/Desktop/my-projects/jarvis/apps/desktop/src-tauri/src/lib.rs)):**
+   - Updated `run()` to discover `PiperConfig` and inject `PiperTtsEngine` and `AudioOutput` into `VoiceSessionController` via `.with_tts(...)` and `.with_audio_output(...)`.
+
+4. **Testing & Verification**:
+   - Unit & Integration: **101 / 101 workspace unit tests passing (100%)** across 20 crates.
+   - Clippy: **0 errors**.
+   - TypeScript: **0 errors**.
+   - Regression Suites: 100% passing across app launcher, process management, window management, screenshot capture, clipboard, and notifications.
+
+## Session 016 — 2026-08-18 (Phase 05 Piper TTS Audio Quality Repair)
+
+**Phase:** 05 (Local Voice Pipeline & Audio Stack — REPAIRED & VERIFIED)  
+**Milestone:** M05.10 / M05.12 (Piper TTS & Real CPAL Audio Playback)  
+**Task:** Piper TTS Audio Quality Repair (Distortion / Static Fix)  
+**Status:** COMPLETE & VERIFIED ✅
+
+1. **Root Cause Analysis (Windows CRT Text-Mode stdout Mismatches):**
+   - Discovered that on Windows, spawning `piper.exe` with `--output_file -` piped binary WAV output through C-runtime `stdout` in text mode, automatically converting every `0x0A` (`\n`) byte into `0x0D 0x0A` (`\r\n`).
+   - This inserted thousands of corrupt extra bytes into the audio payload, shifting 16-bit PCM integer samples by 1 byte and producing heavy static and unintelligible distortion.
+
+2. **Binary File I/O & Temporary File Generation ([`services/speech/src/tts.rs`](file:///c:/Users/Admin/Desktop/my-projects/jarvis/services/speech/src/tts.rs)):**
+   - Updated `PiperTtsEngine::synthesize()` to invoke `--output_file <temp_wav_path>` in `std::env::temp_dir()`. `piper.exe` opens files in binary mode (`wb`), ensuring 100% bit-exact, pristine RIFF WAV bytes match direct CLI execution.
+   - Enhanced `parse_audio_bytes()` with full RIFF chunk scanning (`fmt `, `data`, alignment padding) and support for 16-bit PCM, 32-bit float, 32-bit PCM, and 8-bit PCM formats.
+
+3. **Multi-Channel & Spatial Resampling ([`services/speech/src/output.rs`](file:///c:/Users/Admin/Desktop/my-projects/jarvis/services/speech/src/output.rs)):**
+   - Refined `resample_pcm()` to support arbitrary destination channel counts (1, 2, 4, 6, 8 channels), preventing audio channel scrambling on surround-sound/spatial audio devices.
+   - Added diagnostic logging in `AudioOutput::play()` detailing source and target sample rates, channel counts, formats, sample counts, and duration.
+
+4. **Testing & Verification:**
+   - Unit & Integration: **107 / 107 workspace unit tests passing (100%)** across 20 crates (including RIFF header parsing, mono-to-stereo expansion, sample format conversions, and real test.wav verification).
+   - Clippy: **0 errors**.
+   - TypeScript: **0 errors**.
+   - Preserved hands-free wake word, STT, desktop tools, and barge-in cancellation.
+
 ---
 
 *Log maintained by: JARVIS Development Agent*

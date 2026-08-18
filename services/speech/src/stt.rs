@@ -114,47 +114,6 @@ impl WhisperSttEngine {
         None
     }
 
-    /// Analyze acoustic energy peaks (syllables) and speech duration.
-    fn analyze_acoustic_cadence(audio: &AudioChunk) -> String {
-        let dur = audio.duration_ms();
-        let rms = audio.rms_energy();
-
-        // Count vocal energy peaks above speech threshold
-        let mut peak_count = 0;
-        let mut in_peak = false;
-        let threshold = 0.005;
-
-        for chunk in audio.samples.chunks(160) {
-            let chunk_rms = (chunk.iter().map(|s| s * s).sum::<f32>() / chunk.len() as f32).sqrt();
-            if chunk_rms > threshold {
-                if !in_peak {
-                    peak_count += 1;
-                    in_peak = true;
-                }
-            } else {
-                in_peak = false;
-            }
-        }
-
-        let text = match (dur, peak_count, rms) {
-            (_, p, r) if r > 0.018 || (p == 2 && r > 0.010) => "open chrome".to_string(),
-            (_, p, r) if p >= 3 && r > 0.007 => "open spotify".to_string(),
-            (d, p, r) if d > 1200 && p >= 2 && r > 0.005 => "open chrome".to_string(),
-            _ => "what time is it".to_string(),
-        };
-
-        if !text.is_empty() {
-            tracing::info!(
-                text = %text,
-                rms = format!("{:.4}", rms),
-                duration_ms = dur,
-                peak_count = peak_count,
-                "[STT INFRASTRUCTURE] Acoustic speech pattern recognized"
-            );
-        }
-
-        text
-    }
 }
 
 impl Default for WhisperSttEngine {
@@ -168,20 +127,27 @@ impl SpeechToText for WhisperSttEngine {
     async fn transcribe(&self, audio: &AudioChunk) -> Result<TranscriptionResult, SpeechError> {
         let dur = audio.duration_ms();
 
-        // 1. Try local HTTP Whisper endpoint if available
+        // Try local HTTP Whisper endpoint if available
         let recognized_text = if let Some(http_text) = self.try_http_whisper(audio).await {
             http_text
         } else {
-            // 2. Fallback to acoustic energy & cadence analysis
-            Self::analyze_acoustic_cadence(audio)
+            // Do NOT substitute fake canned commands ("open chrome", "open spotify", "what time is it")!
+            // When no local Whisper STT endpoint is connected and no transcription engine is available,
+            // return SpeechError::SttFailure so zero commands execute.
+            return Err(SpeechError::SttFailure(
+                "STT endpoint unavailable and no speech transcribed".to_string(),
+            ));
         };
 
-        if recognized_text.trim().is_empty() {
-            return Err(SpeechError::SttFailure("No intelligible speech detected".to_string()));
+        let trimmed = recognized_text.trim();
+        if trimmed.is_empty() {
+            return Err(SpeechError::SttFailure(
+                "No intelligible speech detected".to_string(),
+            ));
         }
 
         Ok(TranscriptionResult {
-            text: recognized_text,
+            text: trimmed.to_string(),
             confidence: 0.95,
             language: "en".to_string(),
             duration_ms: dur,
@@ -209,7 +175,7 @@ impl MockSttEngine {
 
 impl Default for MockSttEngine {
     fn default() -> Self {
-        Self::new("what time is it")
+        Self::new("")
     }
 }
 
