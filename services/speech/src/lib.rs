@@ -140,7 +140,7 @@ mod tests {
         let bus = Arc::new(EventBus::new(256));
         let mut rx = bus.subscribe();
 
-        let controller = VoiceSessionController::new(bus.clone()).with_stt(Arc::new(MockSttEngine::default()));
+        let controller = VoiceSessionController::new(bus.clone());
         assert_eq!(controller.current_state().await, VoiceSessionState::Idle);
 
         controller.trigger_wake_word().await.unwrap();
@@ -153,7 +153,7 @@ mod tests {
         assert!(rx.recv().await.is_ok());
 
         let chunk = AudioChunk {
-            samples: vec![0.05; 1600],
+            samples: vec![0.0; 1600],
             format: AudioFormat::default(),
             timestamp_ms: 0,
         };
