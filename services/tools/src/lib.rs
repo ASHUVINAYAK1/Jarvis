@@ -37,8 +37,8 @@ use jarvis_ai::{
     build_detection_prompt, parse_elements_from_vision_response, OcrProvider, OcrRequest,
     OllamaVisionProvider, TesseractOcrProvider, VisionImage, VisionModelProvider, VisionRequest,
 };
-use jarvis_platform::{PlatformAdapter, Rect};
 use jarvis_browser::TabTarget;
+use jarvis_platform::{PlatformAdapter, Rect};
 use jarvis_policy::RiskLevel;
 
 // ============================================================
@@ -353,7 +353,8 @@ impl ListWindowsTool {
             definition: ToolDefinition {
                 id: "list_windows".to_string(),
                 name: "List Windows".to_string(),
-                description: "Enumerates all visible open application windows on the desktop".to_string(),
+                description: "Enumerates all visible open application windows on the desktop"
+                    .to_string(),
                 parameters_schema: json!({
                     "type": "object",
                     "properties": {}
@@ -418,7 +419,8 @@ impl GetActiveWindowTool {
             definition: ToolDefinition {
                 id: "get_active_window".to_string(),
                 name: "Get Active Window".to_string(),
-                description: "Retrieves details of the currently focused foreground desktop window".to_string(),
+                description: "Retrieves details of the currently focused foreground desktop window"
+                    .to_string(),
                 parameters_schema: json!({
                     "type": "object",
                     "properties": {}
@@ -482,7 +484,8 @@ impl FocusWindowTool {
             definition: ToolDefinition {
                 id: "focus_window".to_string(),
                 name: "Focus Window".to_string(),
-                description: "Brings a window to the foreground by handle or application name".to_string(),
+                description: "Brings a window to the foreground by handle or application name"
+                    .to_string(),
                 parameters_schema: json!({
                     "type": "object",
                     "properties": {
@@ -701,7 +704,8 @@ impl RestoreWindowTool {
             definition: ToolDefinition {
                 id: "restore_window".to_string(),
                 name: "Restore Window".to_string(),
-                description: "Restores a minimized or maximized window to normal windowed state".to_string(),
+                description: "Restores a minimized or maximized window to normal windowed state"
+                    .to_string(),
                 parameters_schema: json!({
                     "type": "object",
                     "properties": {
@@ -774,7 +778,9 @@ impl SetWindowBoundsTool {
             definition: ToolDefinition {
                 id: "set_window_bounds".to_string(),
                 name: "Set Window Bounds".to_string(),
-                description: "Moves and resizes a window to specified coordinates (x, y, width, height)".to_string(),
+                description:
+                    "Moves and resizes a window to specified coordinates (x, y, width, height)"
+                        .to_string(),
                 parameters_schema: json!({
                     "type": "object",
                     "properties": {
@@ -825,12 +831,33 @@ impl Tool for SetWindowBoundsTool {
                 details: "Missing required argument 'target' or 'window_handle'".to_string(),
             })?;
 
-        let x = request.arguments.get("x").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-        let y = request.arguments.get("y").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-        let width = request.arguments.get("width").and_then(|v| v.as_u64()).unwrap_or(800) as u32;
-        let height = request.arguments.get("height").and_then(|v| v.as_u64()).unwrap_or(600) as u32;
+        let x = request
+            .arguments
+            .get("x")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0) as i32;
+        let y = request
+            .arguments
+            .get("y")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0) as i32;
+        let width = request
+            .arguments
+            .get("width")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(800) as u32;
+        let height = request
+            .arguments
+            .get("height")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(600) as u32;
 
-        let bounds = jarvis_platform::Rect { x, y, width, height };
+        let bounds = jarvis_platform::Rect {
+            x,
+            y,
+            width,
+            height,
+        };
 
         match ctx.platform_adapter.set_window_bounds(target, bounds).await {
             Ok(_) => Ok(ToolResult::success(
@@ -908,10 +935,23 @@ impl Tool for MoveWindowTool {
                 details: "Missing required argument 'target'".to_string(),
             })?;
 
-        let x = request.arguments.get("x").and_then(|v| v.as_i64()).unwrap_or(100) as i32;
-        let y = request.arguments.get("y").and_then(|v| v.as_i64()).unwrap_or(100) as i32;
+        let x = request
+            .arguments
+            .get("x")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(100) as i32;
+        let y = request
+            .arguments
+            .get("y")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(100) as i32;
 
-        let bounds = jarvis_platform::Rect { x, y, width: 800, height: 600 };
+        let bounds = jarvis_platform::Rect {
+            x,
+            y,
+            width: 800,
+            height: 600,
+        };
 
         match ctx.platform_adapter.set_window_bounds(target, bounds).await {
             Ok(_) => Ok(ToolResult::success(
@@ -989,10 +1029,23 @@ impl Tool for ResizeWindowTool {
                 details: "Missing required argument 'target'".to_string(),
             })?;
 
-        let width = request.arguments.get("width").and_then(|v| v.as_u64()).unwrap_or(1280) as u32;
-        let height = request.arguments.get("height").and_then(|v| v.as_u64()).unwrap_or(720) as u32;
+        let width = request
+            .arguments
+            .get("width")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(1280) as u32;
+        let height = request
+            .arguments
+            .get("height")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(720) as u32;
 
-        let bounds = jarvis_platform::Rect { x: 100, y: 100, width, height };
+        let bounds = jarvis_platform::Rect {
+            x: 100,
+            y: 100,
+            width,
+            height,
+        };
 
         match ctx.platform_adapter.set_window_bounds(target, bounds).await {
             Ok(_) => Ok(ToolResult::success(
@@ -1026,7 +1079,8 @@ impl SetSystemVolumeTool {
             definition: ToolDefinition {
                 id: "set_system_volume".to_string(),
                 name: "Set System Volume".to_string(),
-                description: "Sets system master volume to specified percentage (0 to 100)".to_string(),
+                description: "Sets system master volume to specified percentage (0 to 100)"
+                    .to_string(),
                 parameters_schema: json!({
                     "type": "object",
                     "properties": {
@@ -1254,7 +1308,11 @@ impl Tool for ShutdownSystemTool {
         ctx: &ToolExecutionContext,
     ) -> Result<ToolResult, ToolError> {
         let start = Instant::now();
-        let force = request.arguments.get("force").and_then(|v| v.as_bool()).unwrap_or(false);
+        let force = request
+            .arguments
+            .get("force")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
 
         match ctx.platform_adapter.shutdown_system(force).await {
             Ok(_) => Ok(ToolResult::success(
@@ -1317,7 +1375,11 @@ impl Tool for RestartSystemTool {
         ctx: &ToolExecutionContext,
     ) -> Result<ToolResult, ToolError> {
         let start = Instant::now();
-        let force = request.arguments.get("force").and_then(|v| v.as_bool()).unwrap_or(false);
+        let force = request
+            .arguments
+            .get("force")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
 
         match ctx.platform_adapter.restart_system(force).await {
             Ok(_) => Ok(ToolResult::success(
@@ -1471,7 +1533,8 @@ impl CloseApplicationTool {
             definition: ToolDefinition {
                 id: "close_application".to_string(),
                 name: "Close Application".to_string(),
-                description: "Terminates or closes a running application or process by name or PID".to_string(),
+                description: "Terminates or closes a running application or process by name or PID"
+                    .to_string(),
                 parameters_schema: json!({
                     "type": "object",
                     "properties": {
@@ -1688,7 +1751,8 @@ impl IsApplicationRunningTool {
             definition: ToolDefinition {
                 id: "is_application_running".to_string(),
                 name: "Is Application Running".to_string(),
-                description: "Checks if a specific application or process is currently active".to_string(),
+                description: "Checks if a specific application or process is currently active"
+                    .to_string(),
                 parameters_schema: json!({
                     "type": "object",
                     "properties": {
@@ -1789,9 +1853,13 @@ pub async fn save_screenshot_artifact(
     screenshot: &jarvis_platform::Screenshot,
 ) -> anyhow::Result<(std::path::PathBuf, String)> {
     let dir = get_jarvis_screenshots_dir();
-    tokio::fs::create_dir_all(&dir)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to create screenshot directory '{}': {}", dir.display(), e))?;
+    tokio::fs::create_dir_all(&dir).await.map_err(|e| {
+        anyhow::anyhow!(
+            "Failed to create screenshot directory '{}': {}",
+            dir.display(),
+            e
+        )
+    })?;
 
     let now = chrono::Local::now();
     let filename = format!("jarvis_{}.png", now.format("%Y-%m-%d_%H-%M-%S_%3f"));
@@ -1799,7 +1867,13 @@ pub async fn save_screenshot_artifact(
 
     tokio::fs::write(&file_path, &screenshot.data)
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to write screenshot file '{}': {}", file_path.display(), e))?;
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to write screenshot file '{}': {}",
+                file_path.display(),
+                e
+            )
+        })?;
 
     info!(path = %file_path.display(), bytes = screenshot.data.len(), "Screenshot artifact persisted");
 
@@ -1873,7 +1947,8 @@ impl Tool for TakeScreenshotTool {
                 return Ok(ToolResult::failure(
                     request.request_id,
                     "take_screenshot".to_string(),
-                    "Invalid region dimensions: width and height must be greater than zero".to_string(),
+                    "Invalid region dimensions: width and height must be greater than zero"
+                        .to_string(),
                     start.elapsed().as_millis() as u64,
                 ));
             }
@@ -1989,7 +2064,11 @@ impl Tool for TakeScreenshotDisplayTool {
             .and_then(|v| v.as_u64())
             .unwrap_or(0) as u32;
 
-        let screenshot = match ctx.platform_adapter.take_screenshot_display(display_idx).await {
+        let screenshot = match ctx
+            .platform_adapter
+            .take_screenshot_display(display_idx)
+            .await
+        {
             Ok(s) => s,
             Err(e) => {
                 return Ok(ToolResult::failure(
@@ -2041,7 +2120,9 @@ impl TakeScreenshotRegionTool {
             definition: ToolDefinition {
                 id: "take_screenshot_region".to_string(),
                 name: "Take Screenshot of Region".to_string(),
-                description: "Captures a screenshot of a specific screen region (x, y, width, height)".to_string(),
+                description:
+                    "Captures a screenshot of a specific screen region (x, y, width, height)"
+                        .to_string(),
                 parameters_schema: json!({
                     "type": "object",
                     "properties": {
@@ -2078,10 +2159,26 @@ impl Tool for TakeScreenshotRegionTool {
         ctx: &ToolExecutionContext,
     ) -> Result<ToolResult, ToolError> {
         let start = Instant::now();
-        let x = request.arguments.get("x").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-        let y = request.arguments.get("y").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-        let w = request.arguments.get("width").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-        let h = request.arguments.get("height").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+        let x = request
+            .arguments
+            .get("x")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0) as i32;
+        let y = request
+            .arguments
+            .get("y")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0) as i32;
+        let w = request
+            .arguments
+            .get("width")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as u32;
+        let h = request
+            .arguments
+            .get("height")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as u32;
 
         if w == 0 || h == 0 {
             return Ok(ToolResult::failure(
@@ -2092,7 +2189,12 @@ impl Tool for TakeScreenshotRegionTool {
             ));
         }
 
-        let region = Rect { x, y, width: w, height: h };
+        let region = Rect {
+            x,
+            y,
+            width: w,
+            height: h,
+        };
 
         let screenshot = match ctx.platform_adapter.take_screenshot_region(region).await {
             Ok(s) => s,
@@ -2150,7 +2252,8 @@ impl GetClipboardTool {
             definition: ToolDefinition {
                 id: "get_clipboard".to_string(),
                 name: "Get Clipboard".to_string(),
-                description: "Retrieves text content currently stored in the system clipboard".to_string(),
+                description: "Retrieves text content currently stored in the system clipboard"
+                    .to_string(),
                 parameters_schema: json!({
                     "type": "object",
                     "properties": {}
@@ -2189,7 +2292,11 @@ impl Tool for GetClipboardTool {
                 match content {
                     jarvis_platform::ClipboardContent::Text(text) => {
                         let text_len = text.chars().count();
-                        info!(tool = "get_clipboard", text_len = text_len, "Clipboard text read successfully");
+                        info!(
+                            tool = "get_clipboard",
+                            text_len = text_len,
+                            "Clipboard text read successfully"
+                        );
                         Ok(ToolResult::success(
                             request.request_id,
                             "get_clipboard".to_string(),
@@ -2301,7 +2408,11 @@ impl Tool for SetClipboardTool {
             })?;
 
         let text_len = text.chars().count();
-        info!(tool = "set_clipboard", text_len = text_len, "Setting clipboard text");
+        info!(
+            tool = "set_clipboard",
+            text_len = text_len,
+            "Setting clipboard text"
+        );
 
         match ctx
             .platform_adapter
@@ -2543,14 +2654,12 @@ impl Tool for DescribeScreenTool {
         let start = Instant::now();
 
         // 1. Capture screen via platform adapter
-        let screenshot = ctx
-            .platform_adapter
-            .take_screenshot()
-            .await
-            .map_err(|e| ToolError::ExecutionFailed {
+        let screenshot = ctx.platform_adapter.take_screenshot().await.map_err(|e| {
+            ToolError::ExecutionFailed {
                 tool: self.definition.id.clone(),
                 cause: format!("Failed to capture desktop screenshot: {}", e),
-            })?;
+            }
+        })?;
 
         if screenshot.data.is_empty() {
             return Ok(ToolResult::failure(
@@ -2687,14 +2796,12 @@ impl Tool for ReadScreenTextTool {
         let start = Instant::now();
 
         // 1. Capture screen via platform adapter
-        let screenshot = ctx
-            .platform_adapter
-            .take_screenshot()
-            .await
-            .map_err(|e| ToolError::ExecutionFailed {
+        let screenshot = ctx.platform_adapter.take_screenshot().await.map_err(|e| {
+            ToolError::ExecutionFailed {
                 tool: self.definition.id.clone(),
                 cause: format!("Failed to capture desktop screenshot for OCR: {}", e),
-            })?;
+            }
+        })?;
 
         if screenshot.data.is_empty() {
             return Ok(ToolResult::failure(
@@ -2827,14 +2934,12 @@ impl Tool for ReadScreenTool {
         let start = Instant::now();
 
         // 1. Capture screen via platform adapter (reuse existing screenshot infrastructure)
-        let screenshot = ctx
-            .platform_adapter
-            .take_screenshot()
-            .await
-            .map_err(|e| ToolError::ExecutionFailed {
+        let screenshot = ctx.platform_adapter.take_screenshot().await.map_err(|e| {
+            ToolError::ExecutionFailed {
                 tool: self.definition.id.clone(),
                 cause: format!("Failed to capture desktop screenshot for OCR: {}", e),
-            })?;
+            }
+        })?;
 
         if screenshot.data.is_empty() {
             return Ok(ToolResult::failure(
@@ -2986,14 +3091,15 @@ impl Tool for DetectScreenElementsTool {
         let start = Instant::now();
 
         // 1. Capture desktop screenshot via existing platform infrastructure
-        let screenshot = ctx
-            .platform_adapter
-            .take_screenshot()
-            .await
-            .map_err(|e| ToolError::ExecutionFailed {
+        let screenshot = ctx.platform_adapter.take_screenshot().await.map_err(|e| {
+            ToolError::ExecutionFailed {
                 tool: self.definition.id.clone(),
-                cause: format!("Failed to capture desktop screenshot for element detection: {}", e),
-            })?;
+                cause: format!(
+                    "Failed to capture desktop screenshot for element detection: {}",
+                    e
+                ),
+            }
+        })?;
 
         if screenshot.data.is_empty() {
             return Ok(ToolResult::failure(
@@ -3229,7 +3335,9 @@ impl Tool for InspectUiTreeTool {
 // Browser Session Management Tools (M09.01)
 // ============================================================
 
-use jarvis_browser::{BrowserNavigationRequest, BrowserProvider, BrowserType, PlatformBrowserProvider};
+use jarvis_browser::{
+    BrowserNavigationRequest, BrowserProvider, BrowserType, PlatformBrowserProvider,
+};
 
 /// Tool to inspect browser detection, window, and session state.
 pub struct GetBrowserStatusTool {
@@ -3295,9 +3403,10 @@ impl Tool for GetBrowserStatusTool {
 
         let browser_type = BrowserType::from_str(browser_str);
 
-        let provider: Arc<dyn BrowserProvider> = self.browser_provider.clone().unwrap_or_else(|| {
-            Arc::new(PlatformBrowserProvider::new(ctx.platform_adapter.clone()))
-        });
+        let provider: Arc<dyn BrowserProvider> =
+            self.browser_provider.clone().unwrap_or_else(|| {
+                Arc::new(PlatformBrowserProvider::new(ctx.platform_adapter.clone()))
+            });
 
         let status = provider
             .detect_browser(browser_type.clone())
@@ -3415,9 +3524,10 @@ impl Tool for OpenBrowserTool {
 
         let browser_type = BrowserType::from_str(browser_str);
 
-        let provider: Arc<dyn BrowserProvider> = self.browser_provider.clone().unwrap_or_else(|| {
-            Arc::new(PlatformBrowserProvider::new(ctx.platform_adapter.clone()))
-        });
+        let provider: Arc<dyn BrowserProvider> =
+            self.browser_provider.clone().unwrap_or_else(|| {
+                Arc::new(PlatformBrowserProvider::new(ctx.platform_adapter.clone()))
+            });
 
         let status = provider
             .launch_browser(browser_type.clone())
@@ -3434,10 +3544,13 @@ impl Tool for OpenBrowserTool {
                 browser: browser_type.clone(),
                 new_tab: false,
             };
-            let res = provider.navigate(nav_req).await.map_err(|e| ToolError::ExecutionFailed {
-                tool: self.definition.id.clone(),
-                cause: format!("Browser launched but initial navigation failed: {}", e),
-            })?;
+            let res = provider
+                .navigate(nav_req)
+                .await
+                .map_err(|e| ToolError::ExecutionFailed {
+                    tool: self.definition.id.clone(),
+                    cause: format!("Browser launched but initial navigation failed: {}", e),
+                })?;
             nav_result = Some(res);
         }
 
@@ -3559,9 +3672,10 @@ impl Tool for NavigateBrowserTool {
 
         let browser_type = BrowserType::from_str(browser_str);
 
-        let provider: Arc<dyn BrowserProvider> = self.browser_provider.clone().unwrap_or_else(|| {
-            Arc::new(PlatformBrowserProvider::new(ctx.platform_adapter.clone()))
-        });
+        let provider: Arc<dyn BrowserProvider> =
+            self.browser_provider.clone().unwrap_or_else(|| {
+                Arc::new(PlatformBrowserProvider::new(ctx.platform_adapter.clone()))
+            });
 
         let nav_req = BrowserNavigationRequest {
             url: raw_url.to_string(),
@@ -3569,13 +3683,14 @@ impl Tool for NavigateBrowserTool {
             new_tab,
         };
 
-        let nav_result = provider
-            .navigate(nav_req)
-            .await
-            .map_err(|e| ToolError::ExecutionFailed {
-                tool: self.definition.id.clone(),
-                cause: format!("Browser navigation failed: {}", e),
-            })?;
+        let nav_result =
+            provider
+                .navigate(nav_req)
+                .await
+                .map_err(|e| ToolError::ExecutionFailed {
+                    tool: self.definition.id.clone(),
+                    cause: format!("Browser navigation failed: {}", e),
+                })?;
 
         let elapsed = start.elapsed().as_millis() as u64;
 
@@ -3609,7 +3724,8 @@ impl BrowserBackTool {
             definition: ToolDefinition {
                 id: "browser_back".to_string(),
                 name: "Browser Back".to_string(),
-                description: "Navigates backward in the active browser session history.".to_string(),
+                description: "Navigates backward in the active browser session history."
+                    .to_string(),
                 parameters_schema: json!({
                     "type": "object",
                     "properties": {
@@ -3643,21 +3759,38 @@ impl Tool for BrowserBackTool {
         &self.definition
     }
 
-    async fn execute(&self, request: ToolRequest, ctx: &ToolExecutionContext) -> Result<ToolResult, ToolError> {
+    async fn execute(
+        &self,
+        request: ToolRequest,
+        ctx: &ToolExecutionContext,
+    ) -> Result<ToolResult, ToolError> {
         let start = Instant::now();
-        let browser_str = request.arguments.get("browser").and_then(|v| v.as_str()).unwrap_or("Chrome");
+        let browser_str = request
+            .arguments
+            .get("browser")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Chrome");
         let browser_type = BrowserType::from_str(browser_str);
-        let provider: Arc<dyn BrowserProvider> = self.browser_provider.clone().unwrap_or_else(|| {
-            Arc::new(PlatformBrowserProvider::new(ctx.platform_adapter.clone()))
-        });
+        let provider: Arc<dyn BrowserProvider> =
+            self.browser_provider.clone().unwrap_or_else(|| {
+                Arc::new(PlatformBrowserProvider::new(ctx.platform_adapter.clone()))
+            });
 
-        let res = provider.back(browser_type).await.map_err(|e| ToolError::ExecutionFailed {
-            tool: self.definition.id.clone(),
-            cause: e.to_string(),
-        })?;
+        let res = provider
+            .back(browser_type)
+            .await
+            .map_err(|e| ToolError::ExecutionFailed {
+                tool: self.definition.id.clone(),
+                cause: e.to_string(),
+            })?;
 
         let elapsed = start.elapsed().as_millis() as u64;
-        Ok(ToolResult::success(request.request_id, self.definition.id.clone(), json!(res), elapsed))
+        Ok(ToolResult::success(
+            request.request_id,
+            self.definition.id.clone(),
+            json!(res),
+            elapsed,
+        ))
     }
 }
 
@@ -3707,21 +3840,38 @@ impl Tool for BrowserForwardTool {
         &self.definition
     }
 
-    async fn execute(&self, request: ToolRequest, ctx: &ToolExecutionContext) -> Result<ToolResult, ToolError> {
+    async fn execute(
+        &self,
+        request: ToolRequest,
+        ctx: &ToolExecutionContext,
+    ) -> Result<ToolResult, ToolError> {
         let start = Instant::now();
-        let browser_str = request.arguments.get("browser").and_then(|v| v.as_str()).unwrap_or("Chrome");
+        let browser_str = request
+            .arguments
+            .get("browser")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Chrome");
         let browser_type = BrowserType::from_str(browser_str);
-        let provider: Arc<dyn BrowserProvider> = self.browser_provider.clone().unwrap_or_else(|| {
-            Arc::new(PlatformBrowserProvider::new(ctx.platform_adapter.clone()))
-        });
+        let provider: Arc<dyn BrowserProvider> =
+            self.browser_provider.clone().unwrap_or_else(|| {
+                Arc::new(PlatformBrowserProvider::new(ctx.platform_adapter.clone()))
+            });
 
-        let res = provider.forward(browser_type).await.map_err(|e| ToolError::ExecutionFailed {
-            tool: self.definition.id.clone(),
-            cause: e.to_string(),
-        })?;
+        let res = provider
+            .forward(browser_type)
+            .await
+            .map_err(|e| ToolError::ExecutionFailed {
+                tool: self.definition.id.clone(),
+                cause: e.to_string(),
+            })?;
 
         let elapsed = start.elapsed().as_millis() as u64;
-        Ok(ToolResult::success(request.request_id, self.definition.id.clone(), json!(res), elapsed))
+        Ok(ToolResult::success(
+            request.request_id,
+            self.definition.id.clone(),
+            json!(res),
+            elapsed,
+        ))
     }
 }
 
@@ -3771,21 +3921,38 @@ impl Tool for BrowserReloadTool {
         &self.definition
     }
 
-    async fn execute(&self, request: ToolRequest, ctx: &ToolExecutionContext) -> Result<ToolResult, ToolError> {
+    async fn execute(
+        &self,
+        request: ToolRequest,
+        ctx: &ToolExecutionContext,
+    ) -> Result<ToolResult, ToolError> {
         let start = Instant::now();
-        let browser_str = request.arguments.get("browser").and_then(|v| v.as_str()).unwrap_or("Chrome");
+        let browser_str = request
+            .arguments
+            .get("browser")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Chrome");
         let browser_type = BrowserType::from_str(browser_str);
-        let provider: Arc<dyn BrowserProvider> = self.browser_provider.clone().unwrap_or_else(|| {
-            Arc::new(PlatformBrowserProvider::new(ctx.platform_adapter.clone()))
-        });
+        let provider: Arc<dyn BrowserProvider> =
+            self.browser_provider.clone().unwrap_or_else(|| {
+                Arc::new(PlatformBrowserProvider::new(ctx.platform_adapter.clone()))
+            });
 
-        let res = provider.reload(browser_type).await.map_err(|e| ToolError::ExecutionFailed {
-            tool: self.definition.id.clone(),
-            cause: e.to_string(),
-        })?;
+        let res = provider
+            .reload(browser_type)
+            .await
+            .map_err(|e| ToolError::ExecutionFailed {
+                tool: self.definition.id.clone(),
+                cause: e.to_string(),
+            })?;
 
         let elapsed = start.elapsed().as_millis() as u64;
-        Ok(ToolResult::success(request.request_id, self.definition.id.clone(), json!(res), elapsed))
+        Ok(ToolResult::success(
+            request.request_id,
+            self.definition.id.clone(),
+            json!(res),
+            elapsed,
+        ))
     }
 }
 
@@ -3801,7 +3968,8 @@ impl BrowserCurrentPageTool {
             definition: ToolDefinition {
                 id: "browser_current_page".to_string(),
                 name: "Browser Current Page".to_string(),
-                description: "Gets the current URL and page title of the active browser session.".to_string(),
+                description: "Gets the current URL and page title of the active browser session."
+                    .to_string(),
                 parameters_schema: json!({
                     "type": "object",
                     "properties": {
@@ -3835,18 +4003,30 @@ impl Tool for BrowserCurrentPageTool {
         &self.definition
     }
 
-    async fn execute(&self, request: ToolRequest, ctx: &ToolExecutionContext) -> Result<ToolResult, ToolError> {
+    async fn execute(
+        &self,
+        request: ToolRequest,
+        ctx: &ToolExecutionContext,
+    ) -> Result<ToolResult, ToolError> {
         let start = Instant::now();
-        let browser_str = request.arguments.get("browser").and_then(|v| v.as_str()).unwrap_or("Chrome");
+        let browser_str = request
+            .arguments
+            .get("browser")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Chrome");
         let browser_type = BrowserType::from_str(browser_str);
-        let provider: Arc<dyn BrowserProvider> = self.browser_provider.clone().unwrap_or_else(|| {
-            Arc::new(PlatformBrowserProvider::new(ctx.platform_adapter.clone()))
-        });
+        let provider: Arc<dyn BrowserProvider> =
+            self.browser_provider.clone().unwrap_or_else(|| {
+                Arc::new(PlatformBrowserProvider::new(ctx.platform_adapter.clone()))
+            });
 
-        let session = provider.get_session_state(browser_type.clone()).await.map_err(|e| ToolError::ExecutionFailed {
-            tool: self.definition.id.clone(),
-            cause: e.to_string(),
-        })?;
+        let session = provider
+            .get_session_state(browser_type.clone())
+            .await
+            .map_err(|e| ToolError::ExecutionFailed {
+                tool: self.definition.id.clone(),
+                cause: e.to_string(),
+            })?;
 
         let elapsed = start.elapsed().as_millis() as u64;
         let data = json!({
@@ -3858,7 +4038,12 @@ impl Tool for BrowserCurrentPageTool {
             "latency_ms": elapsed
         });
 
-        Ok(ToolResult::success(request.request_id, self.definition.id.clone(), data, elapsed))
+        Ok(ToolResult::success(
+            request.request_id,
+            self.definition.id.clone(),
+            data,
+            elapsed,
+        ))
     }
 }
 
@@ -3908,18 +4093,30 @@ impl Tool for BrowserListTabsTool {
         &self.definition
     }
 
-    async fn execute(&self, request: ToolRequest, ctx: &ToolExecutionContext) -> Result<ToolResult, ToolError> {
+    async fn execute(
+        &self,
+        request: ToolRequest,
+        ctx: &ToolExecutionContext,
+    ) -> Result<ToolResult, ToolError> {
         let start = Instant::now();
-        let browser_str = request.arguments.get("browser").and_then(|v| v.as_str()).unwrap_or("Chrome");
+        let browser_str = request
+            .arguments
+            .get("browser")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Chrome");
         let browser_type = BrowserType::from_str(browser_str);
-        let provider: Arc<dyn BrowserProvider> = self.browser_provider.clone().unwrap_or_else(|| {
-            Arc::new(PlatformBrowserProvider::new(ctx.platform_adapter.clone()))
-        });
+        let provider: Arc<dyn BrowserProvider> =
+            self.browser_provider.clone().unwrap_or_else(|| {
+                Arc::new(PlatformBrowserProvider::new(ctx.platform_adapter.clone()))
+            });
 
-        let tabs = provider.list_tabs(browser_type.clone()).await.map_err(|e| ToolError::ExecutionFailed {
-            tool: self.definition.id.clone(),
-            cause: e.to_string(),
-        })?;
+        let tabs = provider
+            .list_tabs(browser_type.clone())
+            .await
+            .map_err(|e| ToolError::ExecutionFailed {
+                tool: self.definition.id.clone(),
+                cause: e.to_string(),
+            })?;
 
         let elapsed = start.elapsed().as_millis() as u64;
         let data = json!({
@@ -3929,7 +4126,12 @@ impl Tool for BrowserListTabsTool {
             "latency_ms": elapsed
         });
 
-        Ok(ToolResult::success(request.request_id, self.definition.id.clone(), data, elapsed))
+        Ok(ToolResult::success(
+            request.request_id,
+            self.definition.id.clone(),
+            data,
+            elapsed,
+        ))
     }
 }
 
@@ -3945,7 +4147,8 @@ impl BrowserNewTabTool {
             definition: ToolDefinition {
                 id: "browser_new_tab".to_string(),
                 name: "Browser New Tab".to_string(),
-                description: "Opens a new browser tab, optionally navigating to an initial URL.".to_string(),
+                description: "Opens a new browser tab, optionally navigating to an initial URL."
+                    .to_string(),
                 parameters_schema: json!({
                     "type": "object",
                     "properties": {
@@ -3980,19 +4183,35 @@ impl Tool for BrowserNewTabTool {
         &self.definition
     }
 
-    async fn execute(&self, request: ToolRequest, ctx: &ToolExecutionContext) -> Result<ToolResult, ToolError> {
+    async fn execute(
+        &self,
+        request: ToolRequest,
+        ctx: &ToolExecutionContext,
+    ) -> Result<ToolResult, ToolError> {
         let start = Instant::now();
-        let browser_str = request.arguments.get("browser").and_then(|v| v.as_str()).unwrap_or("Chrome");
-        let url_opt = request.arguments.get("url").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let browser_str = request
+            .arguments
+            .get("browser")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Chrome");
+        let url_opt = request
+            .arguments
+            .get("url")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
         let browser_type = BrowserType::from_str(browser_str);
-        let provider: Arc<dyn BrowserProvider> = self.browser_provider.clone().unwrap_or_else(|| {
-            Arc::new(PlatformBrowserProvider::new(ctx.platform_adapter.clone()))
-        });
+        let provider: Arc<dyn BrowserProvider> =
+            self.browser_provider.clone().unwrap_or_else(|| {
+                Arc::new(PlatformBrowserProvider::new(ctx.platform_adapter.clone()))
+            });
 
-        let tab = provider.new_tab(browser_type.clone(), url_opt).await.map_err(|e| ToolError::ExecutionFailed {
-            tool: self.definition.id.clone(),
-            cause: e.to_string(),
-        })?;
+        let tab = provider
+            .new_tab(browser_type.clone(), url_opt)
+            .await
+            .map_err(|e| ToolError::ExecutionFailed {
+                tool: self.definition.id.clone(),
+                cause: e.to_string(),
+            })?;
 
         let elapsed = start.elapsed().as_millis() as u64;
         let data = json!({
@@ -4001,7 +4220,12 @@ impl Tool for BrowserNewTabTool {
             "latency_ms": elapsed
         });
 
-        Ok(ToolResult::success(request.request_id, self.definition.id.clone(), data, elapsed))
+        Ok(ToolResult::success(
+            request.request_id,
+            self.definition.id.clone(),
+            data,
+            elapsed,
+        ))
     }
 }
 
@@ -4017,7 +4241,8 @@ impl BrowserSwitchTabTool {
             definition: ToolDefinition {
                 id: "browser_switch_tab".to_string(),
                 name: "Browser Switch Tab".to_string(),
-                description: "Switches to an open browser tab by 1-based index or title substring.".to_string(),
+                description: "Switches to an open browser tab by 1-based index or title substring."
+                    .to_string(),
                 parameters_schema: json!({
                     "type": "object",
                     "properties": {
@@ -4053,12 +4278,21 @@ impl Tool for BrowserSwitchTabTool {
         &self.definition
     }
 
-    async fn execute(&self, request: ToolRequest, ctx: &ToolExecutionContext) -> Result<ToolResult, ToolError> {
+    async fn execute(
+        &self,
+        request: ToolRequest,
+        ctx: &ToolExecutionContext,
+    ) -> Result<ToolResult, ToolError> {
         let start = Instant::now();
-        let browser_str = request.arguments.get("browser").and_then(|v| v.as_str()).unwrap_or("Chrome");
+        let browser_str = request
+            .arguments
+            .get("browser")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Chrome");
         let browser_type = BrowserType::from_str(browser_str);
 
-        let target = if let Some(idx) = request.arguments.get("tab_index").and_then(|v| v.as_u64()) {
+        let target = if let Some(idx) = request.arguments.get("tab_index").and_then(|v| v.as_u64())
+        {
             TabTarget::Index(idx as usize)
         } else if let Some(title) = request.arguments.get("title").and_then(|v| v.as_str()) {
             TabTarget::Title(title.to_string())
@@ -4069,14 +4303,18 @@ impl Tool for BrowserSwitchTabTool {
             });
         };
 
-        let provider: Arc<dyn BrowserProvider> = self.browser_provider.clone().unwrap_or_else(|| {
-            Arc::new(PlatformBrowserProvider::new(ctx.platform_adapter.clone()))
-        });
+        let provider: Arc<dyn BrowserProvider> =
+            self.browser_provider.clone().unwrap_or_else(|| {
+                Arc::new(PlatformBrowserProvider::new(ctx.platform_adapter.clone()))
+            });
 
-        let tab = provider.switch_tab(browser_type.clone(), target).await.map_err(|e| ToolError::ExecutionFailed {
-            tool: self.definition.id.clone(),
-            cause: e.to_string(),
-        })?;
+        let tab = provider
+            .switch_tab(browser_type.clone(), target)
+            .await
+            .map_err(|e| ToolError::ExecutionFailed {
+                tool: self.definition.id.clone(),
+                cause: e.to_string(),
+            })?;
 
         let elapsed = start.elapsed().as_millis() as u64;
         let data = json!({
@@ -4085,7 +4323,12 @@ impl Tool for BrowserSwitchTabTool {
             "latency_ms": elapsed
         });
 
-        Ok(ToolResult::success(request.request_id, self.definition.id.clone(), data, elapsed))
+        Ok(ToolResult::success(
+            request.request_id,
+            self.definition.id.clone(),
+            data,
+            elapsed,
+        ))
     }
 }
 
@@ -4136,24 +4379,528 @@ impl Tool for BrowserCloseTabTool {
         &self.definition
     }
 
-    async fn execute(&self, request: ToolRequest, ctx: &ToolExecutionContext) -> Result<ToolResult, ToolError> {
+    async fn execute(
+        &self,
+        request: ToolRequest,
+        ctx: &ToolExecutionContext,
+    ) -> Result<ToolResult, ToolError> {
         let start = Instant::now();
-        let browser_str = request.arguments.get("browser").and_then(|v| v.as_str()).unwrap_or("Chrome");
+        let browser_str = request
+            .arguments
+            .get("browser")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Chrome");
         let browser_type = BrowserType::from_str(browser_str);
 
-        let target = request.arguments.get("tab_index").and_then(|v| v.as_u64()).map(|idx| TabTarget::Index(idx as usize));
+        let target = request
+            .arguments
+            .get("tab_index")
+            .and_then(|v| v.as_u64())
+            .map(|idx| TabTarget::Index(idx as usize));
 
-        let provider: Arc<dyn BrowserProvider> = self.browser_provider.clone().unwrap_or_else(|| {
-            Arc::new(PlatformBrowserProvider::new(ctx.platform_adapter.clone()))
-        });
+        let provider: Arc<dyn BrowserProvider> =
+            self.browser_provider.clone().unwrap_or_else(|| {
+                Arc::new(PlatformBrowserProvider::new(ctx.platform_adapter.clone()))
+            });
 
-        let res = provider.close_tab(browser_type, target).await.map_err(|e| ToolError::ExecutionFailed {
-            tool: self.definition.id.clone(),
-            cause: e.to_string(),
-        })?;
+        let res = provider
+            .close_tab(browser_type, target)
+            .await
+            .map_err(|e| ToolError::ExecutionFailed {
+                tool: self.definition.id.clone(),
+                cause: e.to_string(),
+            })?;
 
         let elapsed = start.elapsed().as_millis() as u64;
-        Ok(ToolResult::success(request.request_id, self.definition.id.clone(), json!(res), elapsed))
+        Ok(ToolResult::success(
+            request.request_id,
+            self.definition.id.clone(),
+            json!(res),
+            elapsed,
+        ))
+    }
+}
+
+// ============================================================
+// M09.03 Browser DOM Element Finding & Interaction Tools
+// ============================================================
+
+/// Tool for finding DOM elements inside active browser page.
+pub struct BrowserFindElementTool {
+    definition: ToolDefinition,
+    browser_provider: Option<Arc<dyn BrowserProvider>>,
+}
+
+impl BrowserFindElementTool {
+    pub fn new() -> Self {
+        Self {
+            definition: ToolDefinition {
+                id: "browser_find_element".to_string(),
+                name: "Find Browser DOM Element".to_string(),
+                description: "Finds DOM elements in the active browser page by query, visible text, tag, or CSS selector.".to_string(),
+                parameters_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "query": { "type": "string", "description": "Element text, tag, or query string" },
+                        "browser": { "type": "string", "description": "Browser name (Chrome, Edge, Firefox, etc.)" }
+                    },
+                    "required": ["query"]
+                }),
+                risk_level: RiskLevel::Low,
+                required_permissions: vec!["browser".to_string()],
+                timeout_secs: 15,
+            },
+            browser_provider: None,
+        }
+    }
+
+    pub fn with_browser_provider(browser_provider: Arc<dyn BrowserProvider>) -> Self {
+        let mut tool = Self::new();
+        tool.browser_provider = Some(browser_provider);
+        tool
+    }
+}
+
+impl Default for BrowserFindElementTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl Tool for BrowserFindElementTool {
+    fn definition(&self) -> &ToolDefinition {
+        &self.definition
+    }
+
+    async fn execute(
+        &self,
+        request: ToolRequest,
+        ctx: &ToolExecutionContext,
+    ) -> Result<ToolResult, ToolError> {
+        let start = Instant::now();
+        let query = request
+            .arguments
+            .get("query")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ToolError::InvalidArguments {
+                tool: self.definition.id.clone(),
+                details: "Missing required string parameter 'query'".to_string(),
+            })?;
+
+        let browser_str = request
+            .arguments
+            .get("browser")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Chrome");
+        let browser_type = BrowserType::from_str(browser_str);
+
+        let provider: Arc<dyn BrowserProvider> =
+            self.browser_provider.clone().unwrap_or_else(|| {
+                Arc::new(PlatformBrowserProvider::new(ctx.platform_adapter.clone()))
+            });
+
+        let res = provider
+            .find_element(browser_type, query)
+            .await
+            .map_err(|e| ToolError::ExecutionFailed {
+                tool: self.definition.id.clone(),
+                cause: e.to_string(),
+            })?;
+
+        let elapsed = start.elapsed().as_millis() as u64;
+        Ok(ToolResult::success(
+            request.request_id,
+            self.definition.id.clone(),
+            json!(res),
+            elapsed,
+        ))
+    }
+}
+
+/// Tool for clicking a matched DOM element inside active browser page.
+pub struct BrowserClickElementTool {
+    definition: ToolDefinition,
+    browser_provider: Option<Arc<dyn BrowserProvider>>,
+}
+
+impl BrowserClickElementTool {
+    pub fn new() -> Self {
+        Self {
+            definition: ToolDefinition {
+                id: "browser_click_element".to_string(),
+                name: "Click Browser DOM Element".to_string(),
+                description: "Clicks a matched DOM element safely inside active browser page."
+                    .to_string(),
+                parameters_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "query": { "type": "string", "description": "Element query, text, or target" },
+                        "target": { "type": "string", "description": "Element query, text, or target" },
+                        "browser": { "type": "string", "description": "Browser name" }
+                    }
+                }),
+                risk_level: RiskLevel::Low,
+                required_permissions: vec!["browser".to_string()],
+                timeout_secs: 15,
+            },
+            browser_provider: None,
+        }
+    }
+
+    pub fn with_browser_provider(browser_provider: Arc<dyn BrowserProvider>) -> Self {
+        let mut tool = Self::new();
+        tool.browser_provider = Some(browser_provider);
+        tool
+    }
+}
+
+impl Default for BrowserClickElementTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl Tool for BrowserClickElementTool {
+    fn definition(&self) -> &ToolDefinition {
+        &self.definition
+    }
+
+    async fn execute(
+        &self,
+        request: ToolRequest,
+        ctx: &ToolExecutionContext,
+    ) -> Result<ToolResult, ToolError> {
+        let start = Instant::now();
+        let target = request
+            .arguments
+            .get("query")
+            .or_else(|| request.arguments.get("target"))
+            .or_else(|| request.arguments.get("element"))
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ToolError::InvalidArguments {
+                tool: self.definition.id.clone(),
+                details: "Missing required parameter 'query' or 'target'".to_string(),
+            })?;
+
+        let browser_str = request
+            .arguments
+            .get("browser")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Chrome");
+        let browser_type = BrowserType::from_str(browser_str);
+
+        let provider: Arc<dyn BrowserProvider> =
+            self.browser_provider.clone().unwrap_or_else(|| {
+                Arc::new(PlatformBrowserProvider::new(ctx.platform_adapter.clone()))
+            });
+
+        let res = provider
+            .click_element(browser_type, target)
+            .await
+            .map_err(|e| ToolError::ExecutionFailed {
+                tool: self.definition.id.clone(),
+                cause: e.to_string(),
+            })?;
+
+        let elapsed = start.elapsed().as_millis() as u64;
+        Ok(ToolResult::success(
+            request.request_id,
+            self.definition.id.clone(),
+            json!(res),
+            elapsed,
+        ))
+    }
+}
+
+/// Tool for focusing a matched DOM element inside active browser page.
+pub struct BrowserFocusElementTool {
+    definition: ToolDefinition,
+    browser_provider: Option<Arc<dyn BrowserProvider>>,
+}
+
+impl BrowserFocusElementTool {
+    pub fn new() -> Self {
+        Self {
+            definition: ToolDefinition {
+                id: "browser_focus_element".to_string(),
+                name: "Focus Browser DOM Element".to_string(),
+                description:
+                    "Focuses a matched input or element safely inside active browser page."
+                        .to_string(),
+                parameters_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "query": { "type": "string", "description": "Element query, text, or target" },
+                        "target": { "type": "string", "description": "Element query, text, or target" },
+                        "browser": { "type": "string", "description": "Browser name" }
+                    }
+                }),
+                risk_level: RiskLevel::Low,
+                required_permissions: vec!["browser".to_string()],
+                timeout_secs: 15,
+            },
+            browser_provider: None,
+        }
+    }
+
+    pub fn with_browser_provider(browser_provider: Arc<dyn BrowserProvider>) -> Self {
+        let mut tool = Self::new();
+        tool.browser_provider = Some(browser_provider);
+        tool
+    }
+}
+
+impl Default for BrowserFocusElementTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl Tool for BrowserFocusElementTool {
+    fn definition(&self) -> &ToolDefinition {
+        &self.definition
+    }
+
+    async fn execute(
+        &self,
+        request: ToolRequest,
+        ctx: &ToolExecutionContext,
+    ) -> Result<ToolResult, ToolError> {
+        let start = Instant::now();
+        let target = request
+            .arguments
+            .get("query")
+            .or_else(|| request.arguments.get("target"))
+            .or_else(|| request.arguments.get("element"))
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ToolError::InvalidArguments {
+                tool: self.definition.id.clone(),
+                details: "Missing required parameter 'query' or 'target'".to_string(),
+            })?;
+
+        let browser_str = request
+            .arguments
+            .get("browser")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Chrome");
+        let browser_type = BrowserType::from_str(browser_str);
+
+        let provider: Arc<dyn BrowserProvider> =
+            self.browser_provider.clone().unwrap_or_else(|| {
+                Arc::new(PlatformBrowserProvider::new(ctx.platform_adapter.clone()))
+            });
+
+        let res = provider
+            .focus_element(browser_type, target)
+            .await
+            .map_err(|e| ToolError::ExecutionFailed {
+                tool: self.definition.id.clone(),
+                cause: e.to_string(),
+            })?;
+
+        let elapsed = start.elapsed().as_millis() as u64;
+        Ok(ToolResult::success(
+            request.request_id,
+            self.definition.id.clone(),
+            json!(res),
+            elapsed,
+        ))
+    }
+}
+
+/// Tool for extracting text content from a DOM element inside active browser page.
+pub struct BrowserGetElementTextTool {
+    definition: ToolDefinition,
+    browser_provider: Option<Arc<dyn BrowserProvider>>,
+}
+
+impl BrowserGetElementTextTool {
+    pub fn new() -> Self {
+        Self {
+            definition: ToolDefinition {
+                id: "browser_get_element_text".to_string(),
+                name: "Get Browser Element Text".to_string(),
+                description:
+                    "Retrieves text content from a matched DOM element inside active browser page."
+                        .to_string(),
+                parameters_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "query": { "type": "string", "description": "Element query, text, or target" },
+                        "target": { "type": "string", "description": "Element query, text, or target" },
+                        "browser": { "type": "string", "description": "Browser name" }
+                    }
+                }),
+                risk_level: RiskLevel::Low,
+                required_permissions: vec!["browser".to_string()],
+                timeout_secs: 15,
+            },
+            browser_provider: None,
+        }
+    }
+
+    pub fn with_browser_provider(browser_provider: Arc<dyn BrowserProvider>) -> Self {
+        let mut tool = Self::new();
+        tool.browser_provider = Some(browser_provider);
+        tool
+    }
+}
+
+impl Default for BrowserGetElementTextTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl Tool for BrowserGetElementTextTool {
+    fn definition(&self) -> &ToolDefinition {
+        &self.definition
+    }
+
+    async fn execute(
+        &self,
+        request: ToolRequest,
+        ctx: &ToolExecutionContext,
+    ) -> Result<ToolResult, ToolError> {
+        let start = Instant::now();
+        let target = request
+            .arguments
+            .get("query")
+            .or_else(|| request.arguments.get("target"))
+            .or_else(|| request.arguments.get("element"))
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ToolError::InvalidArguments {
+                tool: self.definition.id.clone(),
+                details: "Missing required parameter 'query' or 'target'".to_string(),
+            })?;
+
+        let browser_str = request
+            .arguments
+            .get("browser")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Chrome");
+        let browser_type = BrowserType::from_str(browser_str);
+
+        let provider: Arc<dyn BrowserProvider> =
+            self.browser_provider.clone().unwrap_or_else(|| {
+                Arc::new(PlatformBrowserProvider::new(ctx.platform_adapter.clone()))
+            });
+
+        let res = provider
+            .get_element_text(browser_type, target)
+            .await
+            .map_err(|e| ToolError::ExecutionFailed {
+                tool: self.definition.id.clone(),
+                cause: e.to_string(),
+            })?;
+
+        let elapsed = start.elapsed().as_millis() as u64;
+        Ok(ToolResult::success(
+            request.request_id,
+            self.definition.id.clone(),
+            json!(res),
+            elapsed,
+        ))
+    }
+}
+
+/// Tool for retrieving attributes of a DOM element inside active browser page.
+pub struct BrowserGetElementAttributesTool {
+    definition: ToolDefinition,
+    browser_provider: Option<Arc<dyn BrowserProvider>>,
+}
+
+impl BrowserGetElementAttributesTool {
+    pub fn new() -> Self {
+        Self {
+            definition: ToolDefinition {
+                id: "browser_get_element_attributes".to_string(),
+                name: "Get Browser Element Attributes".to_string(),
+                description: "Retrieves HTML attributes and properties of a matched DOM element."
+                    .to_string(),
+                parameters_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "query": { "type": "string", "description": "Element query, text, or target" },
+                        "target": { "type": "string", "description": "Element query, text, or target" },
+                        "browser": { "type": "string", "description": "Browser name" }
+                    }
+                }),
+                risk_level: RiskLevel::Low,
+                required_permissions: vec!["browser".to_string()],
+                timeout_secs: 15,
+            },
+            browser_provider: None,
+        }
+    }
+
+    pub fn with_browser_provider(browser_provider: Arc<dyn BrowserProvider>) -> Self {
+        let mut tool = Self::new();
+        tool.browser_provider = Some(browser_provider);
+        tool
+    }
+}
+
+impl Default for BrowserGetElementAttributesTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl Tool for BrowserGetElementAttributesTool {
+    fn definition(&self) -> &ToolDefinition {
+        &self.definition
+    }
+
+    async fn execute(
+        &self,
+        request: ToolRequest,
+        ctx: &ToolExecutionContext,
+    ) -> Result<ToolResult, ToolError> {
+        let start = Instant::now();
+        let target = request
+            .arguments
+            .get("query")
+            .or_else(|| request.arguments.get("target"))
+            .or_else(|| request.arguments.get("element"))
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ToolError::InvalidArguments {
+                tool: self.definition.id.clone(),
+                details: "Missing required parameter 'query' or 'target'".to_string(),
+            })?;
+
+        let browser_str = request
+            .arguments
+            .get("browser")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Chrome");
+        let browser_type = BrowserType::from_str(browser_str);
+
+        let provider: Arc<dyn BrowserProvider> =
+            self.browser_provider.clone().unwrap_or_else(|| {
+                Arc::new(PlatformBrowserProvider::new(ctx.platform_adapter.clone()))
+            });
+
+        let res = provider
+            .get_element_attributes(browser_type, target)
+            .await
+            .map_err(|e| ToolError::ExecutionFailed {
+                tool: self.definition.id.clone(),
+                cause: e.to_string(),
+            })?;
+
+        let elapsed = start.elapsed().as_millis() as u64;
+        Ok(ToolResult::success(
+            request.request_id,
+            self.definition.id.clone(),
+            json!(res),
+            elapsed,
+        ))
     }
 }
 
@@ -4220,6 +4967,11 @@ impl ToolRegistry {
         registry.register(Box::new(BrowserNewTabTool::new()));
         registry.register(Box::new(BrowserSwitchTabTool::new()));
         registry.register(Box::new(BrowserCloseTabTool::new()));
+        registry.register(Box::new(BrowserFindElementTool::new()));
+        registry.register(Box::new(BrowserClickElementTool::new()));
+        registry.register(Box::new(BrowserFocusElementTool::new()));
+        registry.register(Box::new(BrowserGetElementTextTool::new()));
+        registry.register(Box::new(BrowserGetElementAttributesTool::new()));
         registry
     }
 
@@ -4571,7 +5323,10 @@ mod tests {
         assert!(result.success);
 
         // take_screenshot_region
-        let req = ToolRequest::new("take_screenshot_region", json!({ "x": 0, "y": 0, "width": 500, "height": 400 }));
+        let req = ToolRequest::new(
+            "take_screenshot_region",
+            json!({ "x": 0, "y": 0, "width": 500, "height": 400 }),
+        );
         let result = registry.execute(req, &ctx).await.unwrap();
         assert!(result.success);
     }
@@ -4636,10 +5391,13 @@ mod tests {
         // Verify registration
         assert!(registry.get("show_notification").is_some());
 
-        let req = ToolRequest::new("show_notification", json!({
-            "title": "JARVIS",
-            "message": "Task completed successfully"
-        }));
+        let req = ToolRequest::new(
+            "show_notification",
+            json!({
+                "title": "JARVIS",
+                "message": "Task completed successfully"
+            }),
+        );
         let result = registry.execute(req, &ctx).await.unwrap();
         assert!(result.success);
         assert_eq!(result.data["title"], "JARVIS");
@@ -4652,7 +5410,9 @@ mod tests {
         let registry = ToolRegistry::with_builtins();
         assert!(registry.get("describe_screen").is_some());
 
-        let mock_vision = Arc::new(MockVisionProvider::new().with_canned_description("Desktop contains Chrome and VSCode"));
+        let mock_vision = Arc::new(
+            MockVisionProvider::new().with_canned_description("Desktop contains Chrome and VSCode"),
+        );
         let tool = DescribeScreenTool::with_provider(mock_vision);
         let adapter = Arc::new(MockPlatformAdapter::new(false));
         let ctx = ToolExecutionContext::new(adapter);
@@ -4661,13 +5421,17 @@ mod tests {
         let result = tool.execute(req, &ctx).await.unwrap();
 
         assert!(result.success);
-        assert_eq!(result.data["description"], "Desktop contains Chrome and VSCode");
+        assert_eq!(
+            result.data["description"],
+            "Desktop contains Chrome and VSCode"
+        );
         assert_eq!(result.data["model_id"], "mock-vision-model");
     }
 
     #[tokio::test]
     async fn test_describe_screen_tool_default_prompt() {
-        let mock_vision = Arc::new(MockVisionProvider::new().with_canned_description("Clean desktop overview"));
+        let mock_vision =
+            Arc::new(MockVisionProvider::new().with_canned_description("Clean desktop overview"));
         let tool = DescribeScreenTool::with_provider(mock_vision);
         let adapter = Arc::new(MockPlatformAdapter::new(false));
         let ctx = ToolExecutionContext::new(adapter);
@@ -4690,7 +5454,10 @@ mod tests {
         let result = tool.execute(req, &ctx).await.unwrap();
 
         assert!(!result.success);
-        assert!(result.error.unwrap().contains("Mock vision provider is configured to fail"));
+        assert!(result
+            .error
+            .unwrap()
+            .contains("Mock vision provider is configured to fail"));
     }
 
     #[tokio::test]
@@ -4739,7 +5506,10 @@ mod tests {
         let result = tool.execute(req, &ctx).await.unwrap();
 
         assert!(!result.success);
-        assert!(result.error.unwrap().contains("Mock OCR provider configured to fail"));
+        assert!(result
+            .error
+            .unwrap()
+            .contains("Mock OCR provider configured to fail"));
     }
 
     // ===================================================
@@ -4762,7 +5532,9 @@ mod tests {
         assert_eq!(def.id, "read_screen");
         assert_eq!(def.name, "Read Screen");
         assert_eq!(def.risk_level, RiskLevel::Low);
-        assert!(def.required_permissions.contains(&"screen_capture".to_string()));
+        assert!(def
+            .required_permissions
+            .contains(&"screen_capture".to_string()));
         assert!(def.required_permissions.contains(&"ocr".to_string()));
         let schema = &def.parameters_schema;
         assert_eq!(schema["type"], "object");
@@ -4771,9 +5543,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_read_screen_tool_success_with_mock_ocr() {
-        let mock_ocr = Arc::new(MockOcrProvider::new().with_canned_text(
-            "JARVIS OCR TEST\nSYSTEM STATUS: ONLINE\nCPU: 42 PERCENT",
-        ));
+        let mock_ocr = Arc::new(
+            MockOcrProvider::new()
+                .with_canned_text("JARVIS OCR TEST\nSYSTEM STATUS: ONLINE\nCPU: 42 PERCENT"),
+        );
         let tool = ReadScreenTool::with_provider(mock_ocr);
         let adapter = Arc::new(MockPlatformAdapter::new(false));
         let ctx = ToolExecutionContext::new(adapter);
@@ -4782,7 +5555,10 @@ mod tests {
         let result = tool.execute(req, &ctx).await.unwrap();
 
         assert!(result.success);
-        assert!(result.data["text"].as_str().unwrap().contains("JARVIS OCR TEST"));
+        assert!(result.data["text"]
+            .as_str()
+            .unwrap()
+            .contains("JARVIS OCR TEST"));
         assert_eq!(result.data["has_text"], true);
         assert!(result.data["char_count"].as_u64().unwrap() > 0);
     }
@@ -4834,7 +5610,10 @@ mod tests {
         let result = tool.execute(req, &ctx).await.unwrap();
 
         assert!(!result.success);
-        assert!(result.error.unwrap().contains("Mock OCR provider configured to fail"));
+        assert!(result
+            .error
+            .unwrap()
+            .contains("Mock OCR provider configured to fail"));
     }
 
     #[test]
@@ -4867,7 +5646,10 @@ mod tests {
         let tool = DetectScreenElementsTool::with_vision_provider(mock_vision);
         let ctx = ToolExecutionContext::new(adapter);
 
-        let req = ToolRequest::new("detect_screen_elements", json!({ "query": "find the Submit button" }));
+        let req = ToolRequest::new(
+            "detect_screen_elements",
+            json!({ "query": "find the Submit button" }),
+        );
         let result = tool.execute(req, &ctx).await.unwrap();
 
         assert!(result.success);
@@ -4916,34 +5698,144 @@ mod tests {
         ];
 
         for id in &expected_tools {
-            assert!(registry.get(id).is_some(), "Tool {} should be registered in ToolRegistry::with_builtins()", id);
+            assert!(
+                registry.get(id).is_some(),
+                "Tool {} should be registered in ToolRegistry::with_builtins()",
+                id
+            );
         }
 
         let adapter = Arc::new(MockPlatformAdapter::new(false));
         let ctx = ToolExecutionContext::new(adapter);
-        let mock_provider = Arc::new(MockBrowserProvider::new().with_running(true, 9999, "Google Chrome"));
+        let mock_provider =
+            Arc::new(MockBrowserProvider::new().with_running(true, 9999, "Google Chrome"));
 
         let back_tool = BrowserBackTool::with_browser_provider(mock_provider.clone());
-        let res_back = back_tool.execute(ToolRequest::new("browser_back", json!({})), &ctx).await.unwrap();
+        let res_back = back_tool
+            .execute(ToolRequest::new("browser_back", json!({})), &ctx)
+            .await
+            .unwrap();
         assert!(res_back.success);
 
         let new_tab_tool = BrowserNewTabTool::with_browser_provider(mock_provider.clone());
-        let res_tab = new_tab_tool.execute(ToolRequest::new("browser_new_tab", json!({ "url": "wikipedia.org" })), &ctx).await.unwrap();
+        let res_tab = new_tab_tool
+            .execute(
+                ToolRequest::new("browser_new_tab", json!({ "url": "wikipedia.org" })),
+                &ctx,
+            )
+            .await
+            .unwrap();
         assert!(res_tab.success);
 
         let list_tabs_tool = BrowserListTabsTool::with_browser_provider(mock_provider.clone());
-        let res_list = list_tabs_tool.execute(ToolRequest::new("browser_list_tabs", json!({})), &ctx).await.unwrap();
+        let res_list = list_tabs_tool
+            .execute(ToolRequest::new("browser_list_tabs", json!({})), &ctx)
+            .await
+            .unwrap();
         assert!(res_list.success);
         assert_eq!(res_list.data["tab_count"], 2);
 
         let switch_tab_tool = BrowserSwitchTabTool::with_browser_provider(mock_provider.clone());
-        let res_switch = switch_tab_tool.execute(ToolRequest::new("browser_switch_tab", json!({ "tab_index": 1 })), &ctx).await.unwrap();
+        let res_switch = switch_tab_tool
+            .execute(
+                ToolRequest::new("browser_switch_tab", json!({ "tab_index": 1 })),
+                &ctx,
+            )
+            .await
+            .unwrap();
         assert!(res_switch.success);
 
         let close_tab_tool = BrowserCloseTabTool::with_browser_provider(mock_provider.clone());
-        let res_close = close_tab_tool.execute(ToolRequest::new("browser_close_tab", json!({})), &ctx).await.unwrap();
+        let res_close = close_tab_tool
+            .execute(ToolRequest::new("browser_close_tab", json!({})), &ctx)
+            .await
+            .unwrap();
         assert!(res_close.success);
     }
+
+    #[tokio::test]
+    async fn test_m09_03_browser_dom_tools_registration_and_execution() {
+        use jarvis_browser::MockBrowserProvider;
+
+        let registry = ToolRegistry::with_builtins();
+        let expected_tools = [
+            "browser_find_element",
+            "browser_click_element",
+            "browser_focus_element",
+            "browser_get_element_text",
+            "browser_get_element_attributes",
+        ];
+
+        for id in &expected_tools {
+            assert!(
+                registry.get(id).is_some(),
+                "Tool {} should be registered in ToolRegistry::with_builtins()",
+                id
+            );
+        }
+
+        let adapter = Arc::new(MockPlatformAdapter::new(false));
+        let ctx = ToolExecutionContext::new(adapter);
+        let mock_provider =
+            Arc::new(MockBrowserProvider::new().with_running(true, 9999, "Google Chrome"));
+
+        let find_tool = BrowserFindElementTool::with_browser_provider(mock_provider.clone());
+        let res_find = find_tool
+            .execute(
+                ToolRequest::new("browser_find_element", json!({ "query": "search box" })),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(res_find.success);
+        assert_eq!(res_find.data["match_count"], 1);
+
+        let click_tool = BrowserClickElementTool::with_browser_provider(mock_provider.clone());
+        let res_click = click_tool
+            .execute(
+                ToolRequest::new("browser_click_element", json!({ "query": "Sign In" })),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(res_click.success);
+        assert_eq!(res_click.data["action"], "click");
+
+        let focus_tool = BrowserFocusElementTool::with_browser_provider(mock_provider.clone());
+        let res_focus = focus_tool
+            .execute(
+                ToolRequest::new("browser_focus_element", json!({ "query": "search box" })),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(res_focus.success);
+        assert_eq!(res_focus.data["action"], "focus");
+
+        let text_tool = BrowserGetElementTextTool::with_browser_provider(mock_provider.clone());
+        let res_text = text_tool
+            .execute(
+                ToolRequest::new("browser_get_element_text", json!({ "query": "Sign In" })),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(res_text.success);
+        assert_eq!(res_text.data["text"], "Sign In");
+
+        let attr_tool =
+            BrowserGetElementAttributesTool::with_browser_provider(mock_provider.clone());
+        let res_attr = attr_tool
+            .execute(
+                ToolRequest::new(
+                    "browser_get_element_attributes",
+                    json!({ "query": "search box" }),
+                ),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(res_attr.success);
+        assert_eq!(res_attr.data["action"], "get_attributes");
+    }
 }
-
-

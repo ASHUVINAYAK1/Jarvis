@@ -54,7 +54,9 @@ impl std::str::FromStr for ElementType {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(match s.to_lowercase().trim() {
             "button" | "btn" => Self::Button,
-            "textinput" | "text_input" | "input" | "textbox" | "text box" | "field" | "editbox" => Self::TextInput,
+            "textinput" | "text_input" | "input" | "textbox" | "text box" | "field" | "editbox" => {
+                Self::TextInput
+            }
             "icon" => Self::Icon,
             "link" | "hyperlink" | "url" => Self::Link,
             "image" | "img" | "photo" | "picture" => Self::Image,
@@ -225,7 +227,9 @@ impl ScreenElement {
     pub fn type_matches(&self, query: &str) -> bool {
         let q = query.to_lowercase();
         self.element_type.to_string().contains(&q)
-            || format!("{:?}", self.element_type).to_lowercase().contains(&q)
+            || format!("{:?}", self.element_type)
+                .to_lowercase()
+                .contains(&q)
     }
 }
 
@@ -307,7 +311,12 @@ impl ElementDetectionResult {
     }
 
     /// Construct a result indicating the model could not provide coordinates.
-    pub fn limited(reason: impl Into<String>, query: Option<String>, raw: Option<String>, latency_ms: u64) -> Self {
+    pub fn limited(
+        reason: impl Into<String>,
+        query: Option<String>,
+        raw: Option<String>,
+        latency_ms: u64,
+    ) -> Self {
         Self {
             elements: vec![],
             query,
@@ -400,8 +409,8 @@ pub fn parse_elements_from_vision_response(
                     }
                 }
 
-                let all_invalid = !elements.is_empty()
-                    && elements.iter().all(|e| e.x == -1 && e.y == -1);
+                let all_invalid =
+                    !elements.is_empty() && elements.iter().all(|e| e.x == -1 && e.y == -1);
 
                 if all_invalid {
                     return ElementDetectionResult::limited(
@@ -486,7 +495,10 @@ fn extract_json_from_text(text: &str) -> Option<String> {
 }
 
 fn parse_element_from_json(item: &serde_json::Value) -> Option<ScreenElement> {
-    let element_type_str = item.get("type").and_then(|v| v.as_str()).unwrap_or("unknown");
+    let element_type_str = item
+        .get("type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
     let element_type = ElementType::from_str(element_type_str);
 
     let label = item
@@ -499,7 +511,10 @@ fn parse_element_from_json(item: &serde_json::Value) -> Option<ScreenElement> {
     let y = item.get("y").and_then(|v| v.as_i64()).unwrap_or(-1) as i32;
     let width = item.get("width").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
     let height = item.get("height").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-    let confidence = item.get("confidence").and_then(|v| v.as_f64()).unwrap_or(0.7) as f32;
+    let confidence = item
+        .get("confidence")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.7) as f32;
 
     let description = item
         .get("description")
@@ -535,8 +550,14 @@ mod tests {
     #[test]
     fn test_screen_element_center_calculation() {
         let elem = ScreenElement::new(
-            ElementType::Button, Some("OK".to_string()),
-            100, 200, 80, 30, 0.9, DetectionSource::Vision,
+            ElementType::Button,
+            Some("OK".to_string()),
+            100,
+            200,
+            80,
+            30,
+            0.9,
+            DetectionSource::Vision,
         );
         assert_eq!(elem.center_x, 140);
         assert_eq!(elem.center_y, 215);
@@ -544,22 +565,58 @@ mod tests {
 
     #[test]
     fn test_screen_element_center_at_origin() {
-        let elem = ScreenElement::new(ElementType::Icon, None, 0, 0, 64, 64, 0.8, DetectionSource::Ocr);
+        let elem = ScreenElement::new(
+            ElementType::Icon,
+            None,
+            0,
+            0,
+            64,
+            64,
+            0.8,
+            DetectionSource::Ocr,
+        );
         assert_eq!(elem.center_x, 32);
         assert_eq!(elem.center_y, 32);
     }
 
     #[test]
     fn test_screen_element_confidence_clamped() {
-        let e1 = ScreenElement::new(ElementType::Button, None, 0, 0, 10, 10, 1.5, DetectionSource::Vision);
+        let e1 = ScreenElement::new(
+            ElementType::Button,
+            None,
+            0,
+            0,
+            10,
+            10,
+            1.5,
+            DetectionSource::Vision,
+        );
         assert_eq!(e1.confidence, 1.0);
-        let e2 = ScreenElement::new(ElementType::Button, None, 0, 0, 10, 10, -0.5, DetectionSource::Vision);
+        let e2 = ScreenElement::new(
+            ElementType::Button,
+            None,
+            0,
+            0,
+            10,
+            10,
+            -0.5,
+            DetectionSource::Vision,
+        );
         assert_eq!(e2.confidence, 0.0);
     }
 
     #[test]
     fn test_screen_element_is_confident() {
-        let elem = ScreenElement::new(ElementType::Button, None, 0, 0, 10, 10, 0.85, DetectionSource::Vision);
+        let elem = ScreenElement::new(
+            ElementType::Button,
+            None,
+            0,
+            0,
+            10,
+            10,
+            0.85,
+            DetectionSource::Vision,
+        );
         assert!(elem.is_confident(0.8));
         assert!(!elem.is_confident(0.9));
     }
@@ -580,8 +637,14 @@ mod tests {
     #[test]
     fn test_label_matches_substring() {
         let elem = ScreenElement::new(
-            ElementType::Icon, Some("Google Chrome".to_string()),
-            0, 0, 64, 64, 0.9, DetectionSource::Vision,
+            ElementType::Icon,
+            Some("Google Chrome".to_string()),
+            0,
+            0,
+            64,
+            64,
+            0.9,
+            DetectionSource::Vision,
         );
         assert!(elem.label_matches("chrome"));
         assert!(elem.label_matches("Chrome"));
@@ -592,14 +655,32 @@ mod tests {
 
     #[test]
     fn test_type_matches() {
-        let elem = ScreenElement::new(ElementType::Button, None, 0, 0, 80, 30, 0.9, DetectionSource::Vision);
+        let elem = ScreenElement::new(
+            ElementType::Button,
+            None,
+            0,
+            0,
+            80,
+            30,
+            0.9,
+            DetectionSource::Vision,
+        );
         assert!(elem.type_matches("button"));
         assert!(!elem.type_matches("icon"));
     }
 
     #[test]
     fn test_element_detection_result_has_elements() {
-        let elem = ScreenElement::new(ElementType::Button, Some("OK".to_string()), 10, 10, 80, 30, 0.9, DetectionSource::Vision);
+        let elem = ScreenElement::new(
+            ElementType::Button,
+            Some("OK".to_string()),
+            10,
+            10,
+            80,
+            30,
+            0.9,
+            DetectionSource::Vision,
+        );
         let result = ElementDetectionResult::success(vec![elem], None, 100);
         assert!(result.has_elements());
         assert!(!result.is_limited());
@@ -610,13 +691,34 @@ mod tests {
         let result = ElementDetectionResult::limited("No coordinates available", None, None, 50);
         assert!(!result.has_elements());
         assert!(result.is_limited());
-        assert_eq!(result.detection_limitation.as_deref(), Some("No coordinates available"));
+        assert_eq!(
+            result.detection_limitation.as_deref(),
+            Some("No coordinates available")
+        );
     }
 
     #[test]
     fn test_element_detection_result_filtered_by_query() {
-        let chrome = ScreenElement::new(ElementType::Icon, Some("Chrome".to_string()), 0, 0, 64, 64, 0.9, DetectionSource::Vision);
-        let notepad = ScreenElement::new(ElementType::Icon, Some("Notepad".to_string()), 100, 0, 64, 64, 0.8, DetectionSource::Vision);
+        let chrome = ScreenElement::new(
+            ElementType::Icon,
+            Some("Chrome".to_string()),
+            0,
+            0,
+            64,
+            64,
+            0.9,
+            DetectionSource::Vision,
+        );
+        let notepad = ScreenElement::new(
+            ElementType::Icon,
+            Some("Notepad".to_string()),
+            100,
+            0,
+            64,
+            64,
+            0.8,
+            DetectionSource::Vision,
+        );
         let result = ElementDetectionResult::success(vec![chrome, notepad], None, 100);
         let filtered = result.filtered_by_query("chrome");
         assert_eq!(filtered.len(), 1);
@@ -655,7 +757,8 @@ mod tests {
 
     #[test]
     fn test_parse_elements_from_prose_only_returns_limited() {
-        let response = "I can see a Chrome browser window and a taskbar at the bottom with several icons.";
+        let response =
+            "I can see a Chrome browser window and a taskbar at the bottom with several icons.";
         let result = parse_elements_from_vision_response(response, None, 100);
         assert!(result.is_limited());
         assert!(!result.has_elements());
@@ -672,7 +775,11 @@ mod tests {
     #[test]
     fn test_parse_elements_with_query_stored() {
         let response = r#"{"elements": []}"#;
-        let result = parse_elements_from_vision_response(response, Some("find the Chrome icon".to_string()), 100);
+        let result = parse_elements_from_vision_response(
+            response,
+            Some("find the Chrome icon".to_string()),
+            100,
+        );
         assert_eq!(result.query.as_deref(), Some("find the Chrome icon"));
     }
 

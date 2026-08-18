@@ -1,9 +1,9 @@
 //! Audio Output & Speaker Playback Control via CPAL
 
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use tracing::{info, warn, instrument};
+use tracing::{info, instrument, warn};
 
 use crate::types::{SpeechError, SynthesizedSpeech};
 
@@ -133,7 +133,9 @@ impl AudioOutput {
                 }
             };
 
-            let device_name = device.name().unwrap_or_else(|_| "Default Speaker".to_string());
+            let device_name = device
+                .name()
+                .unwrap_or_else(|_| "Default Speaker".to_string());
             let default_config = match device.default_output_config() {
                 Ok(cfg) => cfg,
                 Err(e) => {
@@ -171,86 +173,80 @@ impl AudioOutput {
             };
 
             let stream_result = match default_config.sample_format() {
-                cpal::SampleFormat::F32 => {
-                    device.build_output_stream(
-                        &default_config.into(),
-                        move |data: &mut [f32], _| {
-                            if cancel_stream_cb.load(Ordering::Relaxed) {
-                                data.fill(0.0);
-                                return;
+                cpal::SampleFormat::F32 => device.build_output_stream(
+                    &default_config.into(),
+                    move |data: &mut [f32], _| {
+                        if cancel_stream_cb.load(Ordering::Relaxed) {
+                            data.fill(0.0);
+                            return;
+                        }
+                        let mut guard = match state_cb.lock() {
+                            Ok(g) => g,
+                            Err(_) => return,
+                        };
+                        let (ref mut pos, ref samples) = *guard;
+                        for sample in data.iter_mut() {
+                            if *pos < samples.len() {
+                                *sample = samples[*pos] * volume;
+                                *pos += 1;
+                            } else {
+                                *sample = 0.0;
                             }
-                            let mut guard = match state_cb.lock() {
-                                Ok(g) => g,
-                                Err(_) => return,
-                            };
-                            let (ref mut pos, ref samples) = *guard;
-                            for sample in data.iter_mut() {
-                                if *pos < samples.len() {
-                                    *sample = samples[*pos] * volume;
-                                    *pos += 1;
-                                } else {
-                                    *sample = 0.0;
-                                }
+                        }
+                    },
+                    err_fn,
+                    None,
+                ),
+                cpal::SampleFormat::I16 => device.build_output_stream(
+                    &default_config.into(),
+                    move |data: &mut [i16], _| {
+                        if cancel_stream_cb.load(Ordering::Relaxed) {
+                            data.fill(0);
+                            return;
+                        }
+                        let mut guard = match state_cb.lock() {
+                            Ok(g) => g,
+                            Err(_) => return,
+                        };
+                        let (ref mut pos, ref samples) = *guard;
+                        for sample in data.iter_mut() {
+                            if *pos < samples.len() {
+                                let f = (samples[*pos] * volume).clamp(-1.0, 1.0);
+                                *sample = (f * 32767.0) as i16;
+                                *pos += 1;
+                            } else {
+                                *sample = 0;
                             }
-                        },
-                        err_fn,
-                        None,
-                    )
-                }
-                cpal::SampleFormat::I16 => {
-                    device.build_output_stream(
-                        &default_config.into(),
-                        move |data: &mut [i16], _| {
-                            if cancel_stream_cb.load(Ordering::Relaxed) {
-                                data.fill(0);
-                                return;
+                        }
+                    },
+                    err_fn,
+                    None,
+                ),
+                cpal::SampleFormat::U16 => device.build_output_stream(
+                    &default_config.into(),
+                    move |data: &mut [u16], _| {
+                        if cancel_stream_cb.load(Ordering::Relaxed) {
+                            data.fill(32768);
+                            return;
+                        }
+                        let mut guard = match state_cb.lock() {
+                            Ok(g) => g,
+                            Err(_) => return,
+                        };
+                        let (ref mut pos, ref samples) = *guard;
+                        for sample in data.iter_mut() {
+                            if *pos < samples.len() {
+                                let f = (samples[*pos] * volume).clamp(-1.0, 1.0);
+                                *sample = ((f * 32767.0) + 32768.0) as u16;
+                                *pos += 1;
+                            } else {
+                                *sample = 32768;
                             }
-                            let mut guard = match state_cb.lock() {
-                                Ok(g) => g,
-                                Err(_) => return,
-                            };
-                            let (ref mut pos, ref samples) = *guard;
-                            for sample in data.iter_mut() {
-                                if *pos < samples.len() {
-                                    let f = (samples[*pos] * volume).clamp(-1.0, 1.0);
-                                    *sample = (f * 32767.0) as i16;
-                                    *pos += 1;
-                                } else {
-                                    *sample = 0;
-                                }
-                            }
-                        },
-                        err_fn,
-                        None,
-                    )
-                }
-                cpal::SampleFormat::U16 => {
-                    device.build_output_stream(
-                        &default_config.into(),
-                        move |data: &mut [u16], _| {
-                            if cancel_stream_cb.load(Ordering::Relaxed) {
-                                data.fill(32768);
-                                return;
-                            }
-                            let mut guard = match state_cb.lock() {
-                                Ok(g) => g,
-                                Err(_) => return,
-                            };
-                            let (ref mut pos, ref samples) = *guard;
-                            for sample in data.iter_mut() {
-                                if *pos < samples.len() {
-                                    let f = (samples[*pos] * volume).clamp(-1.0, 1.0);
-                                    *sample = ((f * 32767.0) + 32768.0) as u16;
-                                    *pos += 1;
-                                } else {
-                                    *sample = 32768;
-                                }
-                            }
-                        },
-                        err_fn,
-                        None,
-                    )
-                }
+                        }
+                    },
+                    err_fn,
+                    None,
+                ),
                 fmt => {
                     let _ = tx.send(Err(SpeechError::OutputFailure(format!(
                         "Unsupported CPAL output sample format: {:?}",
@@ -356,7 +352,11 @@ mod tests {
         let resampled = resample_pcm(&input, 22050, 1, 44100, 2);
         assert!(!resampled.is_empty());
         for &s in &resampled {
-            assert!(s >= -1.0 && s <= 1.0, "Sample {} out of bounds [-1.0, 1.0]", s);
+            assert!(
+                s >= -1.0 && s <= 1.0,
+                "Sample {} out of bounds [-1.0, 1.0]",
+                s
+            );
         }
     }
 

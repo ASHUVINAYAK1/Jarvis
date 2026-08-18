@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>JARVIS DOM Test</title>
+</head>
+
+<body>
+    <h1 id="header">JARVIS DOM TEST</h1>
+
+    <input id="name-input" name="Name" placeholder="Enter your name" type="text" />
+
+    <button id="submit-btn" type="button" onclick="submitForm()">
+        Submit
+    </button>
+
+    <p id="status">Not submitted</p>
+
+    <hr>
+
+    <button id="dup1" class="duplicate">Duplicate</button>
+    <button id="dup2" class="duplicate">Duplicate</button>
+
+    <script>
+        function submitForm() {
+            document.getElementById("status").innerText =
+                "Submitted successfully";
+        }
+    </script>
+</body>
+
+</html>

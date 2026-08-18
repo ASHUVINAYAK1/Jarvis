@@ -17,5 +17,9 @@ async-trait = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 
+reqwest = { workspace = true }
+tokio-tungstenite = "0.21"
+futures-util = "0.3"
+
 # Workspace crates
 jarvis-platform = { path = "../../crates/platform" }

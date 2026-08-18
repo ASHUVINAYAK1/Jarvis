@@ -260,16 +260,13 @@ impl OcrProvider for TesseractOcrProvider {
 
         tokio::fs::write(&temp_img_path, &request.image_bytes)
             .await
-            .map_err(|e| OcrError::Internal(format!("Failed to write temporary OCR image: {}", e)))?;
+            .map_err(|e| {
+                OcrError::Internal(format!("Failed to write temporary OCR image: {}", e))
+            })?;
 
-        let lang = request
-            .language
-            .as_deref()
-            .unwrap_or(&self.config.language);
+        let lang = request.language.as_deref().unwrap_or(&self.config.language);
 
-        let timeout_secs = request
-            .timeout_secs
-            .unwrap_or(self.config.timeout_secs);
+        let timeout_secs = request.timeout_secs.unwrap_or(self.config.timeout_secs);
 
         // 4. Execute Tesseract process directly (stdout mode, process execution)
         let process_cmd = tokio::process::Command::new(&exe_path)
@@ -281,11 +278,8 @@ impl OcrProvider for TesseractOcrProvider {
             .stderr(Stdio::piped())
             .output();
 
-        let output_res = tokio::time::timeout(
-            std::time::Duration::from_secs(timeout_secs),
-            process_cmd,
-        )
-        .await;
+        let output_res =
+            tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), process_cmd).await;
 
         // Clean up temporary image file regardless of process outcome
         let _ = tokio::fs::remove_file(&temp_img_path).await;
@@ -492,7 +486,10 @@ mod tests {
         // If Tesseract happens to be in PATH, resolution might succeed or fail depending on env,
         // but if custom path is invalid and no env set, it checks PATH.
         if let Err(e) = result {
-            assert!(matches!(e, OcrError::ExecutableNotFound(_)) || matches!(e, OcrError::ProcessFailed(_)));
+            assert!(
+                matches!(e, OcrError::ExecutableNotFound(_))
+                    || matches!(e, OcrError::ProcessFailed(_))
+            );
         }
     }
 }

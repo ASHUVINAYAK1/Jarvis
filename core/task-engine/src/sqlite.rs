@@ -454,19 +454,14 @@ impl TaskRepository for SqliteTaskRepository {
                         arguments_json: args,
                         result_json: res,
                         state: parse_step_state(&state_s),
-                        started_at: start_m.and_then(|m| DateTime::from_timestamp_millis(m)),
-                        completed_at: comp_m.and_then(|m| DateTime::from_timestamp_millis(m)),
+                        started_at: start_m.and_then(DateTime::from_timestamp_millis),
+                        completed_at: comp_m.and_then(DateTime::from_timestamp_millis),
                         error: err,
                     })
                 })
                 .map_err(|e| TaskError::Database(e.to_string()))?;
 
-            let mut steps = Vec::new();
-            for step_res in steps_iter {
-                if let Ok(step) = step_res {
-                    steps.push(step);
-                }
-            }
+            let steps = steps_iter.flatten().collect();
 
             Ok(Some(Task {
                 id: parsed_id,
@@ -477,8 +472,8 @@ impl TaskRepository for SqliteTaskRepository {
                 priority,
                 created_at: DateTime::from_timestamp_millis(created_ms).unwrap_or_else(Utc::now),
                 updated_at: DateTime::from_timestamp_millis(updated_ms).unwrap_or_else(Utc::now),
-                started_at: started_ms.and_then(|m| DateTime::from_timestamp_millis(m)),
-                completed_at: completed_ms.and_then(|m| DateTime::from_timestamp_millis(m)),
+                started_at: started_ms.and_then(DateTime::from_timestamp_millis),
+                completed_at: completed_ms.and_then(DateTime::from_timestamp_millis),
                 steps,
                 current_step_index: current_step as u32,
                 error_message: error_msg,
@@ -537,11 +532,9 @@ impl TaskRepository for SqliteTaskRepository {
                 .map_err(|e| TaskError::Database(e.to_string()))?;
 
             let mut ids = Vec::new();
-            for res in ids_iter {
-                if let Ok(id_str) = res {
-                    if let Ok(uuid) = Uuid::parse_str(&id_str) {
-                        ids.push(TaskId(uuid));
-                    }
+            for id_str in ids_iter.flatten() {
+                if let Ok(uuid) = Uuid::parse_str(&id_str) {
+                    ids.push(TaskId(uuid));
                 }
             }
             Ok(ids)
@@ -578,11 +571,9 @@ impl TaskRepository for SqliteTaskRepository {
                 .map_err(|e| TaskError::Database(e.to_string()))?;
 
             let mut ids = Vec::new();
-            for res in ids_iter {
-                if let Ok(id_str) = res {
-                    if let Ok(uuid) = Uuid::parse_str(&id_str) {
-                        ids.push(TaskId(uuid));
-                    }
+            for id_str in ids_iter.flatten() {
+                if let Ok(uuid) = Uuid::parse_str(&id_str) {
+                    ids.push(TaskId(uuid));
                 }
             }
             Ok(ids)
@@ -620,11 +611,9 @@ impl TaskRepository for SqliteTaskRepository {
                 .map_err(|e| TaskError::Database(e.to_string()))?;
 
             let mut ids = Vec::new();
-            for res in ids_iter {
-                if let Ok(id_str) = res {
-                    if let Ok(uuid) = Uuid::parse_str(&id_str) {
-                        ids.push(TaskId(uuid));
-                    }
+            for id_str in ids_iter.flatten() {
+                if let Ok(uuid) = Uuid::parse_str(&id_str) {
+                    ids.push(TaskId(uuid));
                 }
             }
             Ok(ids)

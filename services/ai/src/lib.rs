@@ -154,10 +154,13 @@ mod tests {
     #[tokio::test]
     async fn test_gateway_vision_integration() {
         let mock_model_provider = Arc::new(MockModelProvider::new());
-        let router = Arc::new(ModelRouter::new(ModelRoutingConfig::default()).with_provider(mock_model_provider));
+        let router = Arc::new(
+            ModelRouter::new(ModelRoutingConfig::default()).with_provider(mock_model_provider),
+        );
         let gateway = ModelGateway::new(router);
 
-        let vision_provider = MockVisionProvider::new().with_canned_description("Screen contains Chrome browser window");
+        let vision_provider = MockVisionProvider::new()
+            .with_canned_description("Screen contains Chrome browser window");
         let img = VisionImage::from_png_bytes(vec![1, 2, 3, 4]);
         let req = VisionRequest::new(img, "What is visible on the screen?");
 

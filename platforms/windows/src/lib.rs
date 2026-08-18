@@ -101,6 +101,7 @@ mod sys {
 
 // Global window collection buffer for EnumWindows callback
 #[cfg(target_os = "windows")]
+#[allow(clippy::type_complexity)]
 static ENUM_WINDOWS_BUFFER: Mutex<Vec<(usize, u32, String, bool, bool, Option<Rect>)>> =
     Mutex::new(Vec::new());
 
@@ -999,9 +1000,8 @@ $ms.Dispose()
     }
 
     async fn show_notification(&self, notification: NotificationRequest) -> Result<()> {
-        let escape_ps = |s: &str| -> String {
-            s.replace('`', "``").replace('"', "`\"").replace('$', "`$")
-        };
+        let escape_ps =
+            |s: &str| -> String { s.replace('`', "``").replace('"', "`\"").replace('$', "`$") };
 
         let title = escape_ps(&notification.title);
         let body = escape_ps(&notification.body);
@@ -1134,7 +1134,11 @@ $notification.Dispose()
     }
 
     async fn shutdown_system(&self, force: bool) -> Result<()> {
-        let args = if force { vec!["/s", "/f", "/t", "0"] } else { vec!["/s", "/t", "0"] };
+        let args = if force {
+            vec!["/s", "/f", "/t", "0"]
+        } else {
+            vec!["/s", "/t", "0"]
+        };
         tokio::process::Command::new("shutdown")
             .args(&args)
             .output()
@@ -1144,7 +1148,11 @@ $notification.Dispose()
     }
 
     async fn restart_system(&self, force: bool) -> Result<()> {
-        let args = if force { vec!["/r", "/f", "/t", "0"] } else { vec!["/r", "/t", "0"] };
+        let args = if force {
+            vec!["/r", "/f", "/t", "0"]
+        } else {
+            vec!["/r", "/t", "0"]
+        };
         tokio::process::Command::new("shutdown")
             .args(&args)
             .output()
@@ -1195,7 +1203,12 @@ mod tests {
             pid: 1234,
             visible: true,
             focused: true,
-            bounds: Some(Rect { x: 0, y: 0, width: 1280, height: 720 }),
+            bounds: Some(Rect {
+                x: 0,
+                y: 0,
+                width: 1280,
+                height: 720,
+            }),
             is_minimized: false,
             is_maximized: false,
         };
@@ -1210,14 +1223,30 @@ mod tests {
     #[tokio::test]
     async fn test_invalid_resize_dimensions_rejected() {
         let adapter = WindowsPlatformAdapter::new();
-        let err = adapter.set_window_bounds("0x10204", Rect { x: 0, y: 0, width: 0, height: 100 }).await;
+        let err = adapter
+            .set_window_bounds(
+                "0x10204",
+                Rect {
+                    x: 0,
+                    y: 0,
+                    width: 0,
+                    height: 100,
+                },
+            )
+            .await;
         assert!(err.is_err());
-        assert!(err.unwrap_err().to_string().contains("Invalid window dimensions"));
+        assert!(err
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid window dimensions"));
     }
 
     #[test]
     fn test_parse_hwnd_valid_and_invalid() {
-        assert_eq!(WindowsPlatformAdapter::parse_hwnd("0x10204").unwrap(), 0x10204);
+        assert_eq!(
+            WindowsPlatformAdapter::parse_hwnd("0x10204").unwrap(),
+            0x10204
+        );
         assert_eq!(WindowsPlatformAdapter::parse_hwnd("66052").unwrap(), 66052);
         assert!(WindowsPlatformAdapter::parse_hwnd("invalid_hwnd").is_err());
     }
@@ -1225,7 +1254,9 @@ mod tests {
     #[tokio::test]
     async fn test_resolve_nonexistent_window_fails() {
         let adapter = WindowsPlatformAdapter::new();
-        let err = adapter.resolve_window_info("non_existent_app_xyz_999").await;
+        let err = adapter
+            .resolve_window_info("non_existent_app_xyz_999")
+            .await;
         assert!(err.is_err());
     }
 

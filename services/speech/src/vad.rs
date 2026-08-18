@@ -26,8 +26,8 @@ impl VoiceActivityDetector {
     pub fn new() -> Self {
         Self {
             energy_threshold: 0.005,
-            silence_duration_ms: 1000,    // 1000ms silence required to end utterance
-            min_speech_duration_ms: 300,  // Require at least 300ms of vocal energy
+            silence_duration_ms: 1000, // 1000ms silence required to end utterance
+            min_speech_duration_ms: 300, // Require at least 300ms of vocal energy
             max_speech_duration_ms: 15000,
             current_speech_ms: 0,
             current_silence_ms: 0,

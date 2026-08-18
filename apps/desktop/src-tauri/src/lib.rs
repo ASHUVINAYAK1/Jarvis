@@ -12,7 +12,9 @@ use jarvis_event_bus::{EventBus, JarvisEvent, VoiceEvent};
 use jarvis_logging::init_logging;
 use jarvis_orchestrator::{ExecutionOutcome, Orchestrator};
 use jarvis_platform::{PlatformAdapter, PlatformInfo};
-use jarvis_speech::{AudioCapture, AudioOutput, PiperConfig, PiperTtsEngine, TextToSpeech, VoiceSessionController};
+use jarvis_speech::{
+    AudioCapture, AudioOutput, PiperConfig, PiperTtsEngine, TextToSpeech, VoiceSessionController,
+};
 use jarvis_windows::WindowsPlatformAdapter;
 
 /// Managed state holding the JARVIS core orchestrator & voice controller
@@ -45,7 +47,12 @@ async fn execute_command(
     let outcome = guard.orchestrator.execute_command(command_text).await;
     let voice_controller = guard.voice_controller.clone();
 
-    if let ExecutionOutcome::Success { ref spoken_response, ref tool_name, .. } = outcome {
+    if let ExecutionOutcome::Success {
+        ref spoken_response,
+        ref tool_name,
+        ..
+    } = outcome
+    {
         info!(
             utterance_id = %utterance_id,
             tool_name = %tool_name,
@@ -213,39 +220,46 @@ pub fn run() {
         .manage(jarvis_state)
         .setup(move |app| {
             // Configure System Tray Menu & Icon
-            let toggle_hud = tauri::menu::MenuItemBuilder::with_id("toggle_hud", "Show / Hide JARVIS HUD").build(app)?;
-            let pause_assistant = tauri::menu::MenuItemBuilder::with_id("toggle_assistant", "Pause / Resume Assistant").build(app)?;
+            let toggle_hud =
+                tauri::menu::MenuItemBuilder::with_id("toggle_hud", "Show / Hide JARVIS HUD")
+                    .build(app)?;
+            let pause_assistant = tauri::menu::MenuItemBuilder::with_id(
+                "toggle_assistant",
+                "Pause / Resume Assistant",
+            )
+            .build(app)?;
             let quit = tauri::menu::MenuItemBuilder::with_id("quit", "Quit JARVIS").build(app)?;
 
             let tray_menu = tauri::menu::MenuBuilder::new(app)
                 .items(&[&toggle_hud, &pause_assistant, &quit])
                 .build()?;
 
-            let _tray = tauri::tray::TrayIconBuilder::new()
-                .menu(&tray_menu)
-                .on_menu_event(|app: &tauri::AppHandle, event: tauri::menu::MenuEvent| {
-                    match event.id().as_ref() {
-                        "toggle_hud" => {
-                            if let Some(window) = app.get_webview_window("main") {
-                                let is_vis = window.is_visible().unwrap_or(false);
-                                if is_vis {
-                                    let _ = window.hide();
-                                } else {
-                                    let _ = window.show();
-                                    let _ = window.set_focus();
+            let _tray =
+                tauri::tray::TrayIconBuilder::new()
+                    .menu(&tray_menu)
+                    .on_menu_event(|app: &tauri::AppHandle, event: tauri::menu::MenuEvent| {
+                        match event.id().as_ref() {
+                            "toggle_hud" => {
+                                if let Some(window) = app.get_webview_window("main") {
+                                    let is_vis = window.is_visible().unwrap_or(false);
+                                    if is_vis {
+                                        let _ = window.hide();
+                                    } else {
+                                        let _ = window.show();
+                                        let _ = window.set_focus();
+                                    }
                                 }
                             }
+                            "toggle_assistant" => {
+                                info!("System Tray: Assistant toggle clicked");
+                            }
+                            "quit" => {
+                                app.exit(0);
+                            }
+                            _ => {}
                         }
-                        "toggle_assistant" => {
-                            info!("System Tray: Assistant toggle clicked");
-                        }
-                        "quit" => {
-                            app.exit(0);
-                        }
-                        _ => {}
-                    }
-                })
-                .build(app)?;
+                    })
+                    .build(app)?;
 
             let handle = app.handle().clone();
             let bus = bus_ref.clone();
@@ -296,6 +310,9 @@ mod tests {
         // Path traversal attempts must be rejected
         assert!(validate_screenshot_path("../etc/passwd").is_err());
         assert!(validate_screenshot_path("..\\Windows\\System32\\cmd.exe").is_err());
-        assert!(validate_screenshot_path("C:\\Users\\Admin\\Pictures\\JARVIS\\Screenshots\\..\\secret.txt").is_err());
+        assert!(validate_screenshot_path(
+            "C:\\Users\\Admin\\Pictures\\JARVIS\\Screenshots\\..\\secret.txt"
+        )
+        .is_err());
     }
 }

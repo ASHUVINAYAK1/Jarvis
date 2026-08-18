@@ -1,8 +1,8 @@
 //! Local Text-to-Speech (TTS) Abstraction & Piper Engine
 
-use std::path::PathBuf;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 use crate::types::{AudioChunk, AudioFormat, SpeechError, SynthesizedSpeech};
 
@@ -106,8 +106,14 @@ impl PiperConfig {
     fn find_local_model() -> Option<PathBuf> {
         if let Some(home) = dirs_home() {
             let candidates = [
-                home.join(".jarvis").join("models").join("piper").join("en_GB-alan-medium.onnx"),
-                home.join(".jarvis").join("models").join("piper").join("model.onnx"),
+                home.join(".jarvis")
+                    .join("models")
+                    .join("piper")
+                    .join("en_GB-alan-medium.onnx"),
+                home.join(".jarvis")
+                    .join("models")
+                    .join("piper")
+                    .join("model.onnx"),
                 home.join(".jarvis").join("piper").join("model.onnx"),
             ];
             for c in candidates {
@@ -184,7 +190,10 @@ impl Default for PiperTtsEngine {
 }
 
 /// Helper function to parse RIFF WAV audio bytes (or raw 16-bit LE PCM fallback).
-pub fn parse_audio_bytes(bytes: &[u8], fallback_sample_rate: u32) -> Result<(Vec<f32>, AudioFormat), SpeechError> {
+pub fn parse_audio_bytes(
+    bytes: &[u8],
+    fallback_sample_rate: u32,
+) -> Result<(Vec<f32>, AudioFormat), SpeechError> {
     if bytes.is_empty() {
         return Err(SpeechError::TtsFailure(
             "Synthesized audio buffer is empty".to_string(),
@@ -216,7 +225,8 @@ pub fn parse_audio_bytes(bytes: &[u8], fallback_sample_rate: u32) -> Result<(Vec
                 if fmt_data.len() >= 14 {
                     audio_format_tag = u16::from_le_bytes([fmt_data[0], fmt_data[1]]);
                     channels = u16::from_le_bytes([fmt_data[2], fmt_data[3]]);
-                    sample_rate = u32::from_le_bytes([fmt_data[4], fmt_data[5], fmt_data[6], fmt_data[7]]);
+                    sample_rate =
+                        u32::from_le_bytes([fmt_data[4], fmt_data[5], fmt_data[6], fmt_data[7]]);
                     if fmt_data.len() >= 16 {
                         bits_per_sample = u16::from_le_bytes([fmt_data[14], fmt_data[15]]);
                     }

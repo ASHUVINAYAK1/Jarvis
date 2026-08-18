@@ -56,7 +56,10 @@ impl VoiceSessionController {
         self
     }
 
-    pub fn with_orchestrator(mut self, orchestrator: Arc<jarvis_orchestrator::Orchestrator>) -> Self {
+    pub fn with_orchestrator(
+        mut self,
+        orchestrator: Arc<jarvis_orchestrator::Orchestrator>,
+    ) -> Self {
         self.orchestrator = Some(orchestrator);
         self
     }
@@ -238,10 +241,22 @@ impl VoiceSessionController {
             );
             let outcome = orch.execute_command(command_text).await;
             let (tool_name, resp) = match outcome {
-                jarvis_orchestrator::ExecutionOutcome::Success { spoken_response, tool_name, .. } => (tool_name, spoken_response),
-                jarvis_orchestrator::ExecutionOutcome::ApprovalRequired { reason, .. } => ("approval_required".to_string(), reason),
-                jarvis_orchestrator::ExecutionOutcome::Denied { reason, .. } => ("policy_denied".to_string(), format!("Policy denied: {}", reason)),
-                jarvis_orchestrator::ExecutionOutcome::Failed { error, .. } => ("execution_failed".to_string(), format!("Execution failed: {}", error)),
+                jarvis_orchestrator::ExecutionOutcome::Success {
+                    spoken_response,
+                    tool_name,
+                    ..
+                } => (tool_name, spoken_response),
+                jarvis_orchestrator::ExecutionOutcome::ApprovalRequired { reason, .. } => {
+                    ("approval_required".to_string(), reason)
+                }
+                jarvis_orchestrator::ExecutionOutcome::Denied { reason, .. } => (
+                    "policy_denied".to_string(),
+                    format!("Policy denied: {}", reason),
+                ),
+                jarvis_orchestrator::ExecutionOutcome::Failed { error, .. } => (
+                    "execution_failed".to_string(),
+                    format!("Execution failed: {}", error),
+                ),
             };
             info!(
                 utterance_id = %utterance_id,
@@ -344,7 +359,10 @@ mod tests {
         let controller = VoiceSessionController::new(bus);
 
         controller.trigger_wake_word().await.unwrap();
-        assert_eq!(controller.current_state().await, VoiceSessionState::Listening);
+        assert_eq!(
+            controller.current_state().await,
+            VoiceSessionState::Listening
+        );
 
         controller.reset_to_idle().await;
         assert_eq!(controller.current_state().await, VoiceSessionState::Idle);
@@ -437,22 +455,70 @@ mod tests {
                 running: true,
             })
         }
-        async fn close_application(&self, _app: &str) -> anyhow::Result<()> { Ok(()) }
-        async fn list_processes(&self) -> anyhow::Result<Vec<jarvis_platform::ProcessInfo>> { Ok(vec![]) }
-        async fn is_application_running(&self, _app: &str) -> anyhow::Result<bool> { Ok(true) }
-        async fn list_windows(&self) -> anyhow::Result<Vec<jarvis_platform::WindowInfo>> { Ok(vec![]) }
-        async fn focus_window(&self, _handle: &str) -> anyhow::Result<()> { Ok(()) }
-        async fn minimize_window(&self, _handle: &str) -> anyhow::Result<()> { Ok(()) }
-        async fn maximize_window(&self, _handle: &str) -> anyhow::Result<()> { Ok(()) }
-        async fn set_window_bounds(&self, _handle: &str, _bounds: jarvis_platform::Rect) -> anyhow::Result<()> { Ok(()) }
-        async fn take_screenshot(&self) -> anyhow::Result<jarvis_platform::Screenshot> { unimplemented!() }
-        async fn take_screenshot_display(&self, _display: u32) -> anyhow::Result<jarvis_platform::Screenshot> { unimplemented!() }
-        async fn take_screenshot_region(&self, _rect: jarvis_platform::Rect) -> anyhow::Result<jarvis_platform::Screenshot> { unimplemented!() }
-        async fn get_clipboard(&self) -> anyhow::Result<jarvis_platform::ClipboardContent> { Ok(jarvis_platform::ClipboardContent::Empty) }
-        async fn set_clipboard(&self, _content: jarvis_platform::ClipboardContent) -> anyhow::Result<()> { Ok(()) }
-        async fn show_notification(&self, _notification: jarvis_platform::NotificationRequest) -> anyhow::Result<()> { Ok(()) }
-        async fn get_disk_space(&self) -> anyhow::Result<jarvis_platform::DiskInfo> { unimplemented!() }
-        async fn get_memory_info(&self) -> anyhow::Result<jarvis_platform::MemoryInfo> { unimplemented!() }
+        async fn close_application(&self, _app: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn list_processes(&self) -> anyhow::Result<Vec<jarvis_platform::ProcessInfo>> {
+            Ok(vec![])
+        }
+        async fn is_application_running(&self, _app: &str) -> anyhow::Result<bool> {
+            Ok(true)
+        }
+        async fn list_windows(&self) -> anyhow::Result<Vec<jarvis_platform::WindowInfo>> {
+            Ok(vec![])
+        }
+        async fn focus_window(&self, _handle: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn minimize_window(&self, _handle: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn maximize_window(&self, _handle: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn set_window_bounds(
+            &self,
+            _handle: &str,
+            _bounds: jarvis_platform::Rect,
+        ) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn take_screenshot(&self) -> anyhow::Result<jarvis_platform::Screenshot> {
+            unimplemented!()
+        }
+        async fn take_screenshot_display(
+            &self,
+            _display: u32,
+        ) -> anyhow::Result<jarvis_platform::Screenshot> {
+            unimplemented!()
+        }
+        async fn take_screenshot_region(
+            &self,
+            _rect: jarvis_platform::Rect,
+        ) -> anyhow::Result<jarvis_platform::Screenshot> {
+            unimplemented!()
+        }
+        async fn get_clipboard(&self) -> anyhow::Result<jarvis_platform::ClipboardContent> {
+            Ok(jarvis_platform::ClipboardContent::Empty)
+        }
+        async fn set_clipboard(
+            &self,
+            _content: jarvis_platform::ClipboardContent,
+        ) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn show_notification(
+            &self,
+            _notification: jarvis_platform::NotificationRequest,
+        ) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn get_disk_space(&self) -> anyhow::Result<jarvis_platform::DiskInfo> {
+            unimplemented!()
+        }
+        async fn get_memory_info(&self) -> anyhow::Result<jarvis_platform::MemoryInfo> {
+            unimplemented!()
+        }
     }
 
     #[tokio::test]

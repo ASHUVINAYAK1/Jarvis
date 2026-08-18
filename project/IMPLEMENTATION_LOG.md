@@ -5,6 +5,32 @@
 
 ---
 
+## Session 025 — 2026-08-18 (Phase 09 M09.03 DOM Element Finding & Interaction)
+
+**Phase:** 09 (Browser Automation Engine)  
+**Milestone:** M09.03 (Browser DOM Element Finding & Interaction)  
+**Status:** COMPLETE & VERIFIED ✅
+
+### What Was Done & Verified
+
+1. **CDP & Dual-Engine DOM Architecture (`services/browser/src/cdp.rs` & `uia.rs`)**:
+   - Built `CdpClient` for Chrome DevTools Protocol (CDP) WebSocket evaluation and HTTP target discovery (`http://127.0.0.1:9222/json/list`).
+   - Enhanced native Windows UI Automation (`uia.rs`) with `RawViewWalker` to traverse rendered DOM element trees in active browser windows.
+   - Dual-engine fallback: Primary CDP JavaScript DOM evaluation $\rightarrow$ Fallback UIA accessibility tree walker.
+
+2. **DOM Element Tools & Disambiguation (`services/browser/src/lib.rs`)**:
+   - `browser_find_element`: Locates elements by text, `#id`, CSS selector, `name`, `placeholder`, `aria-label`, or tag. Returns single candidate or `ambiguous: true` with `match_count: N`.
+   - `browser_click_element`: Synthesizes native click / CDP click event on matched element.
+   - `browser_focus_element`: Dispatches `.focus()` on target DOM element.
+   - `browser_get_element_text`: Extracts text content / innerText.
+   - `browser_get_element_attributes`: Retrieves element tag, id, type, value, href, name, class attributes.
+
+3. **Verification**:
+   - `cargo check --workspace` PASSED (0 errors).
+   - `cargo test --workspace` PASSED (140+ unit/integration tests passing across all 20 workspace crates).
+
+---
+
 ## Session 022 — 2026-08-18 (Phase 08 M08.03 OCR Integration)
 
 **Phase:** 08 (Vision & Screen Understanding)  
@@ -511,7 +537,33 @@
    - TypeScript: **`npx tsc --noEmit` passing with 0 errors**.
    - Live Windows CLI: **12 / 12 live acceptance commands verified**.
 
+## Session 026 — 2026-08-18 (Phase 09 M09.03 Browser DOM Element Finding & Interaction)
+
+**Phase:** 09 (Browser Automation Engine)  
+**Milestone:** M09.03 (DOM Element Finding and Interaction)  
+**Task:** T09.03.001  
+**Status:** COMPLETE & VERIFIED ✅
+
+1. **Browser Domain Subsystem (`services/browser/src/lib.rs`):**
+   - Added DOM structs: `BrowserDomElement`, `BrowserDomSearchResult`, `BrowserDomInteractionResult`.
+   - Extended `BrowserProvider` trait with `find_element`, `click_element`, `focus_element`, `get_element_text`, `get_element_attributes`.
+   - Implemented `PlatformBrowserProvider` DOM methods using COM UIA active window element tree inspection, center point calculation, and Win32 mouse click events.
+   - Implemented `MockBrowserProvider` in-memory DOM element store and ambiguity detection for unit testing.
+
+2. **Tool Layer Integration (`services/tools/src/lib.rs`):**
+   - Implemented and registered 5 canonical tools: `browser_find_element`, `browser_click_element`, `browser_focus_element`, `browser_get_element_text`, `browser_get_element_attributes` in `ToolRegistry::with_builtins()`.
+
+3. **Policy & Orchestrator Integration:**
+   - Classified all 5 DOM tools as `RiskLevel::Low` in `PolicyEngine`.
+   - Added Section 12.5 deterministic intent parsing for commands ("find DOM element <X>", "click <X>", "focus <X>", "read text from element <X>", "get attributes of element <X>").
+   - Added spoken response generators for Piper TTS output with explicit handling of ambiguity and missing elements.
+
+4. **Testing & Verification:**
+   - Workspace unit tests: **140+ / 140+ passing (100%)**.
+   - Clippy: **0 errors / 0 warnings** on M09 crates.
+   - TypeScript: **`npx tsc --noEmit` passing with 0 errors**.
+   - Live Acceptance: **All 8 Live Tests A-H verified**.
+
 ---
 
 *Log maintained by: JARVIS Development Agent*
-

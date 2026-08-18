@@ -69,7 +69,7 @@ impl WhisperSttEngine {
         // fmt chunk
         wav.extend_from_slice(b"fmt ");
         wav.extend_from_slice(&16u32.to_le_bytes()); // subchunk1 size
-        wav.extend_from_slice(&1u16.to_le_bytes());  // PCM
+        wav.extend_from_slice(&1u16.to_le_bytes()); // PCM
         wav.extend_from_slice(&channels.to_le_bytes());
         wav.extend_from_slice(&sample_rate.to_le_bytes());
         let byte_rate = sample_rate * channels as u32 * (bits_per_sample as u32 / 8);
@@ -93,10 +93,14 @@ impl WhisperSttEngine {
 
     /// Try querying local HTTP Whisper server endpoint if available.
     async fn try_http_whisper(&self, audio: &AudioChunk) -> Option<String> {
-        let endpoint = self.endpoint.as_deref().unwrap_or("http://127.0.0.1:8080/inference");
+        let endpoint = self
+            .endpoint
+            .as_deref()
+            .unwrap_or("http://127.0.0.1:8080/inference");
         let wav_data = Self::export_wav_bytes(audio);
 
-        let res = self.client
+        let res = self
+            .client
             .post(endpoint)
             .header("Content-Type", "audio/wav")
             .body(wav_data)
@@ -113,7 +117,6 @@ impl WhisperSttEngine {
         }
         None
     }
-
 }
 
 impl Default for WhisperSttEngine {

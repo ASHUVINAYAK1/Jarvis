@@ -120,6 +120,11 @@ impl PolicyEngine {
         overrides.insert("browser_new_tab".to_string(), RiskLevel::Low);
         overrides.insert("browser_switch_tab".to_string(), RiskLevel::Low);
         overrides.insert("browser_close_tab".to_string(), RiskLevel::Low);
+        overrides.insert("browser_find_element".to_string(), RiskLevel::Low);
+        overrides.insert("browser_click_element".to_string(), RiskLevel::Low);
+        overrides.insert("browser_focus_element".to_string(), RiskLevel::Low);
+        overrides.insert("browser_get_element_text".to_string(), RiskLevel::Low);
+        overrides.insert("browser_get_element_attributes".to_string(), RiskLevel::Low);
         overrides.insert("close_application".to_string(), RiskLevel::Medium);
         overrides.insert("delete_file".to_string(), RiskLevel::Critical);
 

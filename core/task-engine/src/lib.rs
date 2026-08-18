@@ -144,18 +144,13 @@ impl std::fmt::Display for TaskState {
 // Task Priority
 // ============================================================
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Default)]
 pub enum TaskPriority {
     Low = 0,
+    #[default]
     Normal = 1,
     High = 2,
     Critical = 3,
-}
-
-impl Default for TaskPriority {
-    fn default() -> Self {
-        TaskPriority::Normal
-    }
 }
 
 // ============================================================

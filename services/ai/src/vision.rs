@@ -3,9 +3,9 @@
 //! Provides the core abstraction and local implementations for processing images/screenshots
 //! and returning structured natural language visual understanding.
 
-use std::time::Instant;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use std::time::Instant;
 
 use crate::types::{ModelError, ModelProviderType, ModelUsage};
 
@@ -335,8 +335,8 @@ pub struct MockVisionProvider {
 impl MockVisionProvider {
     pub fn new() -> Self {
         Self {
-            canned_description:
-                "The screen shows a Google Chrome browser window open to GitHub.".to_string(),
+            canned_description: "The screen shows a Google Chrome browser window open to GitHub."
+                .to_string(),
             failing: false,
             config: VisionConfig::default(),
         }
@@ -463,7 +463,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_mock_vision_provider() {
-        let provider = MockVisionProvider::new().with_canned_description("Verified mock screen description");
+        let provider =
+            MockVisionProvider::new().with_canned_description("Verified mock screen description");
         let img = VisionImage::from_png_bytes(vec![10, 20, 30]);
         let req = VisionRequest::new(img, "Analyze UI");
 

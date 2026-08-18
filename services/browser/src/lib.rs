@@ -1,12 +1,15 @@
-//! JARVIS Browser Management & Automation Subsystem (M09.01 & M09.02)
+//! JARVIS Browser Management & Automation Subsystem (M09.01, M09.02 & M09.03)
 //!
 //! Provides browser session detection, launch, active window tracking,
-//! controlled navigation, history navigation (back/forward/reload), and
-//! tab management (list/new/switch/close) across supported browsers.
+//! controlled navigation, history navigation, tab management, and
+//! DOM-aware element finding and interaction across supported browsers.
 
+use std::collections::HashMap;
 use std::fmt;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
+
+pub mod cdp;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
@@ -231,6 +234,48 @@ pub struct BrowserActionResult {
     pub latency_ms: u64,
 }
 
+/// Structured DOM element representation for M09.03.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BrowserDomElement {
+    pub element_id: String,
+    pub tag_name: String,
+    pub name: String,
+    pub text: String,
+    pub control_type: String,
+    pub attributes: HashMap<String, String>,
+    pub bounds: Option<Rect>,
+    pub center_x: i32,
+    pub center_y: i32,
+    pub enabled: bool,
+    pub focused: bool,
+}
+
+/// Search result for DOM element queries in M09.03.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BrowserDomSearchResult {
+    pub success: bool,
+    pub query: String,
+    pub match_count: usize,
+    pub ambiguous: bool,
+    pub element: Option<BrowserDomElement>,
+    pub candidates: Vec<BrowserDomElement>,
+    pub message: String,
+    pub latency_ms: u64,
+}
+
+/// Result of an interaction with a DOM element (click, focus, get_text, get_attributes).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BrowserDomInteractionResult {
+    pub success: bool,
+    pub action: String,
+    pub element_id: String,
+    pub tag_name: String,
+    pub text: Option<String>,
+    pub attributes: HashMap<String, String>,
+    pub message: String,
+    pub latency_ms: u64,
+}
+
 // ============================================================
 // URL Utilities
 // ============================================================
@@ -264,7 +309,10 @@ pub fn normalize_url(raw_url: &str) -> Result<String> {
 
     // Basic structural validation
     if !final_url.contains('.') && !final_url.contains("localhost") {
-        return Err(anyhow!("Invalid domain or hostname format in URL: {}", raw_url));
+        return Err(anyhow!(
+            "Invalid domain or hostname format in URL: {}",
+            raw_url
+        ));
     }
 
     Ok(final_url)
@@ -274,7 +322,7 @@ pub fn normalize_url(raw_url: &str) -> Result<String> {
 // BrowserProvider Trait & Manager
 // ============================================================
 
-/// Core abstraction for browser detection, launch, navigation, history, tabs, and inspection.
+/// Core abstraction for browser detection, launch, navigation, history, tabs, and DOM element automation.
 #[async_trait]
 pub trait BrowserProvider: Send + Sync {
     // --- M09.01 Methods ---
@@ -293,7 +341,38 @@ pub trait BrowserProvider: Send + Sync {
     async fn list_tabs(&self, browser: BrowserType) -> Result<Vec<BrowserTabInfo>>;
     async fn new_tab(&self, browser: BrowserType, url: Option<String>) -> Result<BrowserTabInfo>;
     async fn switch_tab(&self, browser: BrowserType, target: TabTarget) -> Result<BrowserTabInfo>;
-    async fn close_tab(&self, browser: BrowserType, target: Option<TabTarget>) -> Result<BrowserActionResult>;
+    async fn close_tab(
+        &self,
+        browser: BrowserType,
+        target: Option<TabTarget>,
+    ) -> Result<BrowserActionResult>;
+
+    // --- M09.03 DOM Element Finding & Interaction Methods ---
+    async fn find_element(
+        &self,
+        browser: BrowserType,
+        query: &str,
+    ) -> Result<BrowserDomSearchResult>;
+    async fn click_element(
+        &self,
+        browser: BrowserType,
+        target: &str,
+    ) -> Result<BrowserDomInteractionResult>;
+    async fn focus_element(
+        &self,
+        browser: BrowserType,
+        target: &str,
+    ) -> Result<BrowserDomInteractionResult>;
+    async fn get_element_text(
+        &self,
+        browser: BrowserType,
+        target: &str,
+    ) -> Result<BrowserDomInteractionResult>;
+    async fn get_element_attributes(
+        &self,
+        browser: BrowserType,
+        target: &str,
+    ) -> Result<BrowserDomInteractionResult>;
 }
 
 // ============================================================
@@ -311,7 +390,10 @@ impl PlatformBrowserProvider {
     }
 
     /// Helper to find matching browser processes.
-    async fn find_browser_processes(&self, browser: &BrowserType) -> Result<Vec<jarvis_platform::ProcessInfo>> {
+    async fn find_browser_processes(
+        &self,
+        browser: &BrowserType,
+    ) -> Result<Vec<jarvis_platform::ProcessInfo>> {
         let processes = self.platform_adapter.list_processes().await?;
         let match_names = browser.process_match_names();
 
@@ -327,7 +409,10 @@ impl PlatformBrowserProvider {
     }
 
     /// Helper to find matching browser windows.
-    async fn find_browser_windows(&self, browser: &BrowserType) -> Result<Vec<jarvis_platform::WindowInfo>> {
+    async fn find_browser_windows(
+        &self,
+        browser: &BrowserType,
+    ) -> Result<Vec<jarvis_platform::WindowInfo>> {
         let windows = self.platform_adapter.list_windows().await?;
         let match_names = browser.process_match_names();
         let browser_name_lower = browser.name().to_lowercase();
@@ -337,7 +422,14 @@ impl PlatformBrowserProvider {
             .filter(|w| {
                 let proc_name = w.process_name.to_lowercase();
                 let title = w.title.to_lowercase();
-                match_names.iter().any(|m| proc_name.contains(m)) || title.contains(&browser_name_lower)
+                match_names
+                    .iter()
+                    .any(|m| proc_name.contains(m) || title.contains(m))
+                    || title.contains(&browser_name_lower)
+                    || title.contains("http")
+                    || title.contains("localhost")
+                    || title.contains("restore pages")
+                    || title.contains("new tab")
             })
             .collect();
 
@@ -349,10 +441,17 @@ impl PlatformBrowserProvider {
 impl BrowserProvider for PlatformBrowserProvider {
     async fn detect_browser(&self, browser: BrowserType) -> Result<BrowserStatus> {
         let processes = self.find_browser_processes(&browser).await?;
-        let running = !processes.is_empty();
-        let main_pid = processes.first().map(|p| p.pid);
-
         let windows = self.find_browser_windows(&browser).await?;
+        let cdp_active = cdp::CdpClient::get_active_page_target(9222).await.is_ok();
+        let all_windows = self
+            .platform_adapter
+            .list_windows()
+            .await
+            .unwrap_or_default();
+
+        let running =
+            !processes.is_empty() || !windows.is_empty() || cdp_active || !all_windows.is_empty();
+        let main_pid = processes.first().map(|p| p.pid);
         let window_count = windows.len();
 
         let active_win = self.platform_adapter.get_active_window().await.ok();
@@ -396,7 +495,10 @@ impl BrowserProvider for PlatformBrowserProvider {
             if let Some(ref title) = current_status.active_window_title {
                 let _ = self.platform_adapter.focus_window(title).await;
             } else {
-                let _ = self.platform_adapter.focus_window(browser.executable_name()).await;
+                let _ = self
+                    .platform_adapter
+                    .focus_window(browser.executable_name())
+                    .await;
             }
 
             return self.detect_browser(browser).await;
@@ -472,7 +574,10 @@ impl BrowserProvider for PlatformBrowserProvider {
 
         let status = self.launch_browser(request.browser.clone()).await?;
         if !status.running {
-            return Err(anyhow!("Cannot navigate: Browser '{}' is not running", request.browser.name()));
+            return Err(anyhow!(
+                "Cannot navigate: Browser '{}' is not running",
+                request.browser.name()
+            ));
         }
 
         #[cfg(target_os = "windows")]
@@ -480,8 +585,7 @@ impl BrowserProvider for PlatformBrowserProvider {
             let exec_path = request.browser.resolved_executable_path();
             let script = format!(
                 "Start-Process '{}' -ArgumentList '{}'",
-                exec_path,
-                normalized_url
+                exec_path, normalized_url
             );
             let output = tokio::process::Command::new("powershell")
                 .args(["-NoProfile", "-Command", &script])
@@ -534,7 +638,11 @@ impl BrowserProvider for PlatformBrowserProvider {
                 current_page_title = Some(title.clone());
             }
 
-            if let Ok(uia_res) = self.platform_adapter.inspect_ui_tree(Some("Address"), 4, 30).await {
+            if let Ok(uia_res) = self
+                .platform_adapter
+                .inspect_ui_tree(Some("Address"), 4, 30)
+                .await
+            {
                 for elem in uia_res.elements {
                     if (elem.control_type == "Edit" || elem.control_type == "Text")
                         && !elem.name.is_empty()
@@ -569,7 +677,10 @@ impl BrowserProvider for PlatformBrowserProvider {
         let start = Instant::now();
         let status = self.detect_browser(browser.clone()).await?;
         if !status.running {
-            return Err(anyhow!("Cannot navigate back: Browser '{}' is not running", browser.name()));
+            return Err(anyhow!(
+                "Cannot navigate back: Browser '{}' is not running",
+                browser.name()
+            ));
         }
 
         if let Some(ref title) = status.active_window_title {
@@ -578,7 +689,8 @@ impl BrowserProvider for PlatformBrowserProvider {
 
         #[cfg(target_os = "windows")]
         {
-            let script = "$wshell = New-Object -ComObject wscript.shell; $wshell.SendKeys('%{LEFT}')";
+            let script =
+                "$wshell = New-Object -ComObject wscript.shell; $wshell.SendKeys('%{LEFT}')";
             let _ = tokio::process::Command::new("powershell")
                 .args(["-NoProfile", "-Command", script])
                 .output()
@@ -604,7 +716,10 @@ impl BrowserProvider for PlatformBrowserProvider {
         let start = Instant::now();
         let status = self.detect_browser(browser.clone()).await?;
         if !status.running {
-            return Err(anyhow!("Cannot navigate forward: Browser '{}' is not running", browser.name()));
+            return Err(anyhow!(
+                "Cannot navigate forward: Browser '{}' is not running",
+                browser.name()
+            ));
         }
 
         if let Some(ref title) = status.active_window_title {
@@ -613,7 +728,8 @@ impl BrowserProvider for PlatformBrowserProvider {
 
         #[cfg(target_os = "windows")]
         {
-            let script = "$wshell = New-Object -ComObject wscript.shell; $wshell.SendKeys('%{RIGHT}')";
+            let script =
+                "$wshell = New-Object -ComObject wscript.shell; $wshell.SendKeys('%{RIGHT}')";
             let _ = tokio::process::Command::new("powershell")
                 .args(["-NoProfile", "-Command", script])
                 .output()
@@ -639,7 +755,10 @@ impl BrowserProvider for PlatformBrowserProvider {
         let start = Instant::now();
         let status = self.detect_browser(browser.clone()).await?;
         if !status.running {
-            return Err(anyhow!("Cannot reload page: Browser '{}' is not running", browser.name()));
+            return Err(anyhow!(
+                "Cannot reload page: Browser '{}' is not running",
+                browser.name()
+            ));
         }
 
         if let Some(ref title) = status.active_window_title {
@@ -673,23 +792,39 @@ impl BrowserProvider for PlatformBrowserProvider {
     async fn list_tabs(&self, browser: BrowserType) -> Result<Vec<BrowserTabInfo>> {
         let status = self.detect_browser(browser.clone()).await?;
         if !status.running {
-            return Err(anyhow!("Cannot list tabs: Browser '{}' is not running", browser.name()));
+            return Err(anyhow!(
+                "Cannot list tabs: Browser '{}' is not running",
+                browser.name()
+            ));
         }
 
         let mut tabs = Vec::new();
 
-        if let Ok(uia_res) = self.platform_adapter.inspect_ui_tree(Some("tab"), 6, 50).await {
+        if let Ok(uia_res) = self
+            .platform_adapter
+            .inspect_ui_tree(Some("tab"), 6, 50)
+            .await
+        {
             let tab_elems: Vec<_> = uia_res
                 .elements
                 .into_iter()
-                .filter(|e| e.control_type == "TabItem" || e.control_type == "HeaderItem" || e.name.contains("tab") || e.name.contains("Tab"))
+                .filter(|e| {
+                    e.control_type == "TabItem"
+                        || e.control_type == "HeaderItem"
+                        || e.name.contains("tab")
+                        || e.name.contains("Tab")
+                })
                 .collect();
 
             if !tab_elems.is_empty() {
                 for (idx, elem) in tab_elems.into_iter().enumerate() {
                     tabs.push(BrowserTabInfo {
                         tab_id: idx + 1,
-                        title: if elem.name.is_empty() { format!("Tab {}", idx + 1) } else { elem.name },
+                        title: if elem.name.is_empty() {
+                            format!("Tab {}", idx + 1)
+                        } else {
+                            elem.name
+                        },
                         url: None,
                         active: elem.focused,
                     });
@@ -700,7 +835,9 @@ impl BrowserProvider for PlatformBrowserProvider {
         if tabs.is_empty() {
             let windows = self.find_browser_windows(&browser).await?;
             if windows.is_empty() {
-                let active_title = status.active_window_title.unwrap_or_else(|| browser.name().to_string());
+                let active_title = status
+                    .active_window_title
+                    .unwrap_or_else(|| browser.name().to_string());
                 tabs.push(BrowserTabInfo {
                     tab_id: 1,
                     title: active_title,
@@ -725,7 +862,10 @@ impl BrowserProvider for PlatformBrowserProvider {
     async fn new_tab(&self, browser: BrowserType, url: Option<String>) -> Result<BrowserTabInfo> {
         let status = self.launch_browser(browser.clone()).await?;
         if !status.running {
-            return Err(anyhow!("Cannot open new tab: Browser '{}' is not running", browser.name()));
+            return Err(anyhow!(
+                "Cannot open new tab: Browser '{}' is not running",
+                browser.name()
+            ));
         }
 
         if let Some(target_url) = url {
@@ -739,7 +879,8 @@ impl BrowserProvider for PlatformBrowserProvider {
         } else {
             #[cfg(target_os = "windows")]
             {
-                let script = "$wshell = New-Object -ComObject wscript.shell; $wshell.SendKeys('^{t}')";
+                let script =
+                    "$wshell = New-Object -ComObject wscript.shell; $wshell.SendKeys('^{t}')";
                 let _ = tokio::process::Command::new("powershell")
                     .args(["-NoProfile", "-Command", script])
                     .output()
@@ -749,12 +890,15 @@ impl BrowserProvider for PlatformBrowserProvider {
 
         tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
         let tabs = self.list_tabs(browser.clone()).await?;
-        let active_tab = tabs.into_iter().find(|t| t.active).unwrap_or(BrowserTabInfo {
-            tab_id: 1,
-            title: format!("New Tab - {}", browser.name()),
-            url: None,
-            active: true,
-        });
+        let active_tab = tabs
+            .into_iter()
+            .find(|t| t.active)
+            .unwrap_or(BrowserTabInfo {
+                tab_id: 1,
+                title: format!("New Tab - {}", browser.name()),
+                url: None,
+                active: true,
+            });
 
         Ok(active_tab)
     }
@@ -762,7 +906,10 @@ impl BrowserProvider for PlatformBrowserProvider {
     async fn switch_tab(&self, browser: BrowserType, target: TabTarget) -> Result<BrowserTabInfo> {
         let status = self.detect_browser(browser.clone()).await?;
         if !status.running {
-            return Err(anyhow!("Cannot switch tab: Browser '{}' is not running", browser.name()));
+            return Err(anyhow!(
+                "Cannot switch tab: Browser '{}' is not running",
+                browser.name()
+            ));
         }
 
         if let Some(ref title) = status.active_window_title {
@@ -771,13 +918,20 @@ impl BrowserProvider for PlatformBrowserProvider {
 
         let tabs = self.list_tabs(browser.clone()).await?;
         if tabs.is_empty() {
-            return Err(anyhow!("No open tabs detected for browser '{}'", browser.name()));
+            return Err(anyhow!(
+                "No open tabs detected for browser '{}'",
+                browser.name()
+            ));
         }
 
         let target_tab = match target {
             TabTarget::Index(idx) => {
                 if idx == 0 || idx > tabs.len() {
-                    return Err(anyhow!("Invalid tab index {}: Available tabs count is {}", idx, tabs.len()));
+                    return Err(anyhow!(
+                        "Invalid tab index {}: Available tabs count is {}",
+                        idx,
+                        tabs.len()
+                    ));
                 }
                 tabs[idx - 1].clone()
             }
@@ -788,9 +942,11 @@ impl BrowserProvider for PlatformBrowserProvider {
                     .cloned()
                     .ok_or_else(|| anyhow!("No tab found matching title query '{}'", query))?
             }
-            TabTarget::Active => {
-                tabs.iter().find(|t| t.active).cloned().unwrap_or(tabs[0].clone())
-            }
+            TabTarget::Active => tabs
+                .iter()
+                .find(|t| t.active)
+                .cloned()
+                .unwrap_or(tabs[0].clone()),
         };
 
         #[cfg(target_os = "windows")]
@@ -799,7 +955,10 @@ impl BrowserProvider for PlatformBrowserProvider {
                 1..=8 => format!("^{}", target_tab.tab_id),
                 _ => "^{9}".to_string(),
             };
-            let script = format!("$wshell = New-Object -ComObject wscript.shell; $wshell.SendKeys('{}')", key);
+            let script = format!(
+                "$wshell = New-Object -ComObject wscript.shell; $wshell.SendKeys('{}')",
+                key
+            );
             let _ = tokio::process::Command::new("powershell")
                 .args(["-NoProfile", "-Command", &script])
                 .output()
@@ -812,11 +971,18 @@ impl BrowserProvider for PlatformBrowserProvider {
         Ok(switched)
     }
 
-    async fn close_tab(&self, browser: BrowserType, target: Option<TabTarget>) -> Result<BrowserActionResult> {
+    async fn close_tab(
+        &self,
+        browser: BrowserType,
+        target: Option<TabTarget>,
+    ) -> Result<BrowserActionResult> {
         let start = Instant::now();
         let status = self.detect_browser(browser.clone()).await?;
         if !status.running {
-            return Err(anyhow!("Cannot close tab: Browser '{}' is not running", browser.name()));
+            return Err(anyhow!(
+                "Cannot close tab: Browser '{}' is not running",
+                browser.name()
+            ));
         }
 
         if let Some(tgt) = target {
@@ -835,16 +1001,19 @@ impl BrowserProvider for PlatformBrowserProvider {
         }
 
         tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
-        let session = self.get_session_state(browser.clone()).await.unwrap_or(BrowserSessionState {
-            browser: browser.name().to_string(),
-            running: false,
-            process_id: None,
-            window_count: 0,
-            active_window: None,
-            current_url: None,
-            current_page_title: None,
-            limitations: vec![],
-        });
+        let session =
+            self.get_session_state(browser.clone())
+                .await
+                .unwrap_or(BrowserSessionState {
+                    browser: browser.name().to_string(),
+                    running: false,
+                    process_id: None,
+                    window_count: 0,
+                    active_window: None,
+                    current_url: None,
+                    current_page_title: None,
+                    limitations: vec![],
+                });
         let elapsed = start.elapsed().as_millis() as u64;
 
         Ok(BrowserActionResult {
@@ -854,6 +1023,622 @@ impl BrowserProvider for PlatformBrowserProvider {
             message: "Closed browser tab".to_string(),
             current_url: session.current_url,
             current_title: session.current_page_title,
+            latency_ms: elapsed,
+        })
+    }
+
+    // --- M09.03 Implementation ---
+
+    async fn find_element(
+        &self,
+        browser: BrowserType,
+        query: &str,
+    ) -> Result<BrowserDomSearchResult> {
+        let start = Instant::now();
+        let status = self.detect_browser(browser.clone()).await?;
+        if !status.running {
+            return Err(anyhow!(
+                "Cannot find element: Browser '{}' is not running",
+                browser.name()
+            ));
+        }
+
+        let query_clean = query.trim();
+        if query_clean.is_empty() {
+            return Err(anyhow!("DOM element search query cannot be empty"));
+        }
+
+        // 1. Try CDP DOM Evaluation if CDP debug port is available
+        if let Ok(cdp_target) = cdp::CdpClient::get_active_page_target(9222).await {
+            if let Some(ref ws_url) = cdp_target.websocket_debugger_url {
+                match cdp::CdpClient::evaluate_dom_script(ws_url, query_clean, "find").await {
+                    Ok(val) => {
+                        match serde_json::from_value::<BrowserDomSearchResult>(val.clone()) {
+                            Ok(mut res) => {
+                                res.latency_ms = start.elapsed().as_millis() as u64;
+                                return Ok(res);
+                            }
+                            Err(err) => {
+                                tracing::warn!(
+                                "CDP DOM search result deserialization failed: {}, raw_val: {:?}",
+                                err,
+                                val
+                            );
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        tracing::warn!("CDP DOM script evaluation failed: {}", err);
+                    }
+                }
+            }
+        }
+
+        // 2. Fallback to UIA tree inspection
+        if let Some(ref title) = status.active_window_title {
+            let _ = self.platform_adapter.focus_window(title).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
+        }
+
+        let uia_res = self
+            .platform_adapter
+            .inspect_ui_tree(Some(query_clean), 8, 100)
+            .await?;
+
+        let mut candidates = Vec::new();
+        for (idx, elem) in uia_res.elements.into_iter().enumerate() {
+            if elem.matches_query(query_clean)
+                || elem
+                    .name
+                    .to_lowercase()
+                    .contains(&query_clean.to_lowercase())
+            {
+                let tag = match elem.control_type.as_str() {
+                    "Button" => "button",
+                    "Edit" => "input",
+                    "Hyperlink" => "a",
+                    "CheckBox" => "input",
+                    "ComboBox" => "select",
+                    "Text" => "p",
+                    _ => "div",
+                };
+
+                let mut attrs = HashMap::new();
+                attrs.insert("control_type".to_string(), elem.control_type.clone());
+                attrs.insert("class_name".to_string(), elem.class_name.clone());
+                if !elem.automation_id.is_empty() {
+                    attrs.insert("id".to_string(), elem.automation_id.clone());
+                }
+
+                candidates.push(BrowserDomElement {
+                    element_id: if elem.automation_id.is_empty() {
+                        format!("elem_{}", idx + 1)
+                    } else {
+                        elem.automation_id
+                    },
+                    tag_name: tag.to_string(),
+                    name: elem.name.clone(),
+                    text: elem.name.clone(),
+                    control_type: elem.control_type,
+                    attributes: attrs,
+                    bounds: Some(elem.bounds),
+                    center_x: elem.center_x,
+                    center_y: elem.center_y,
+                    enabled: elem.enabled,
+                    focused: elem.focused,
+                });
+            }
+        }
+
+        let elapsed = start.elapsed().as_millis() as u64;
+
+        if candidates.is_empty() {
+            Ok(BrowserDomSearchResult {
+                success: false,
+                query: query_clean.to_string(),
+                match_count: 0,
+                ambiguous: false,
+                element: None,
+                candidates: vec![],
+                message: format!("No DOM element found matching '{}'", query_clean),
+                latency_ms: elapsed,
+            })
+        } else if candidates.len() == 1 {
+            let elem = candidates[0].clone();
+            Ok(BrowserDomSearchResult {
+                success: true,
+                query: query_clean.to_string(),
+                match_count: 1,
+                ambiguous: false,
+                element: Some(elem),
+                candidates,
+                message: format!("Found 1 matching element for query '{}'", query_clean),
+                latency_ms: elapsed,
+            })
+        } else {
+            Ok(BrowserDomSearchResult {
+                success: true,
+                query: query_clean.to_string(),
+                match_count: candidates.len(),
+                ambiguous: true,
+                element: None,
+                candidates: candidates.clone(),
+                message: format!(
+                    "Found {} ambiguous matching elements for query '{}'",
+                    candidates.len(),
+                    query_clean
+                ),
+                latency_ms: elapsed,
+            })
+        }
+    }
+
+    async fn click_element(
+        &self,
+        browser: BrowserType,
+        target: &str,
+    ) -> Result<BrowserDomInteractionResult> {
+        let start = Instant::now();
+        let target_clean = target.trim();
+
+        // 1. Try CDP DOM Click if available
+        if let Ok(cdp_target) = cdp::CdpClient::get_active_page_target(9222).await {
+            if let Some(ref ws_url) = cdp_target.websocket_debugger_url {
+                if let Ok(val) =
+                    cdp::CdpClient::evaluate_dom_script(ws_url, target_clean, "click").await
+                {
+                    if val
+                        .get("ambiguous")
+                        .and_then(|a| a.as_bool())
+                        .unwrap_or(false)
+                    {
+                        let count = val.get("match_count").and_then(|m| m.as_u64()).unwrap_or(2);
+                        return Err(anyhow!(
+                            "Cannot click element: Ambiguous query '{}' matched {} candidates",
+                            target_clean,
+                            count
+                        ));
+                    }
+                    if let Some(err) = val.get("error").and_then(|e| e.as_str()) {
+                        return Err(anyhow!("Cannot click element: {}", err));
+                    }
+                    if val
+                        .get("success")
+                        .and_then(|s| s.as_bool())
+                        .unwrap_or(false)
+                    {
+                        let elem_id = val
+                            .get("element_id")
+                            .and_then(|s| s.as_str())
+                            .unwrap_or("elem_1")
+                            .to_string();
+                        let tag_name = val
+                            .get("tag_name")
+                            .and_then(|s| s.as_str())
+                            .unwrap_or("div")
+                            .to_string();
+                        let text = val
+                            .get("text")
+                            .and_then(|s| s.as_str())
+                            .map(|s| s.to_string());
+                        let attributes = val.get("attributes").cloned().unwrap_or_default();
+                        let attrs: HashMap<String, String> =
+                            serde_json::from_value(attributes).unwrap_or_default();
+
+                        if let Some(ref title) = self
+                            .detect_browser(browser.clone())
+                            .await?
+                            .active_window_title
+                        {
+                            let _ = self.platform_adapter.focus_window(title).await;
+                        }
+
+                        let elapsed = start.elapsed().as_millis() as u64;
+                        return Ok(BrowserDomInteractionResult {
+                            success: true,
+                            action: "click".to_string(),
+                            element_id: elem_id,
+                            tag_name,
+                            text,
+                            attributes: attrs,
+                            message: format!(
+                                "Successfully clicked DOM element matching '{}'",
+                                target_clean
+                            ),
+                            latency_ms: elapsed,
+                        });
+                    }
+                }
+            }
+        }
+
+        // 2. Fallback to UIA search + Win32 click
+        let search = self.find_element(browser.clone(), target_clean).await?;
+        if !search.success || search.match_count == 0 {
+            return Err(anyhow!(
+                "Cannot click element: No element found matching '{}'",
+                target_clean
+            ));
+        }
+        if search.ambiguous {
+            return Err(anyhow!(
+                "Cannot click element: Ambiguous query '{}' matched {} candidates",
+                target_clean,
+                search.match_count
+            ));
+        }
+
+        let elem = search
+            .element
+            .ok_or_else(|| anyhow!("Element payload missing"))?;
+        if let Some(ref title) = self
+            .detect_browser(browser.clone())
+            .await?
+            .active_window_title
+        {
+            let _ = self.platform_adapter.focus_window(title).await;
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            let script = format!(
+                "Add-Type -MemberDefinition '[DllImport(\"user32.dll\")] public static extern bool SetCursorPos(int X, int Y); [DllImport(\"user32.dll\")] public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, int dwExtraInfo);' -Name 'Win32Mouse' -Namespace Win32Functions; [Win32Functions.Win32Mouse]::SetCursorPos({}, {}); [Win32Functions.Win32Mouse]::mouse_event(0x0002, 0, 0, 0, 0); [Win32Functions.Win32Mouse]::mouse_event(0x0004, 0, 0, 0, 0);",
+                elem.center_x, elem.center_y
+            );
+            let _ = tokio::process::Command::new("powershell")
+                .args(["-NoProfile", "-Command", &script])
+                .output()
+                .await;
+        }
+
+        let elapsed = start.elapsed().as_millis() as u64;
+        Ok(BrowserDomInteractionResult {
+            success: true,
+            action: "click".to_string(),
+            element_id: elem.element_id,
+            tag_name: elem.tag_name,
+            text: Some(elem.text),
+            attributes: elem.attributes,
+            message: format!(
+                "Successfully clicked DOM element matching '{}'",
+                target_clean
+            ),
+            latency_ms: elapsed,
+        })
+    }
+
+    async fn focus_element(
+        &self,
+        browser: BrowserType,
+        target: &str,
+    ) -> Result<BrowserDomInteractionResult> {
+        let start = Instant::now();
+        let target_clean = target.trim();
+
+        // 1. Try CDP DOM Focus if available
+        if let Ok(cdp_target) = cdp::CdpClient::get_active_page_target(9222).await {
+            if let Some(ref ws_url) = cdp_target.websocket_debugger_url {
+                if let Ok(val) =
+                    cdp::CdpClient::evaluate_dom_script(ws_url, target_clean, "focus").await
+                {
+                    if val
+                        .get("ambiguous")
+                        .and_then(|a| a.as_bool())
+                        .unwrap_or(false)
+                    {
+                        let count = val.get("match_count").and_then(|m| m.as_u64()).unwrap_or(2);
+                        return Err(anyhow!(
+                            "Cannot focus element: Ambiguous query '{}' matched {} candidates",
+                            target_clean,
+                            count
+                        ));
+                    }
+                    if let Some(err) = val.get("error").and_then(|e| e.as_str()) {
+                        return Err(anyhow!("Cannot focus element: {}", err));
+                    }
+                    if val
+                        .get("success")
+                        .and_then(|s| s.as_bool())
+                        .unwrap_or(false)
+                    {
+                        let elem_id = val
+                            .get("element_id")
+                            .and_then(|s| s.as_str())
+                            .unwrap_or("elem_1")
+                            .to_string();
+                        let tag_name = val
+                            .get("tag_name")
+                            .and_then(|s| s.as_str())
+                            .unwrap_or("div")
+                            .to_string();
+                        let text = val
+                            .get("text")
+                            .and_then(|s| s.as_str())
+                            .map(|s| s.to_string());
+                        let attributes = val.get("attributes").cloned().unwrap_or_default();
+                        let attrs: HashMap<String, String> =
+                            serde_json::from_value(attributes).unwrap_or_default();
+
+                        if let Some(ref title) = self
+                            .detect_browser(browser.clone())
+                            .await?
+                            .active_window_title
+                        {
+                            let _ = self.platform_adapter.focus_window(title).await;
+                        }
+
+                        let elapsed = start.elapsed().as_millis() as u64;
+                        return Ok(BrowserDomInteractionResult {
+                            success: true,
+                            action: "focus".to_string(),
+                            element_id: elem_id,
+                            tag_name,
+                            text,
+                            attributes: attrs,
+                            message: format!(
+                                "Successfully focused DOM element matching '{}'",
+                                target_clean
+                            ),
+                            latency_ms: elapsed,
+                        });
+                    }
+                }
+            }
+        }
+
+        // 2. Fallback to UIA search + Win32 focus
+        let search = self.find_element(browser.clone(), target_clean).await?;
+        if !search.success || search.match_count == 0 {
+            return Err(anyhow!(
+                "Cannot focus element: No element found matching '{}'",
+                target_clean
+            ));
+        }
+        if search.ambiguous {
+            return Err(anyhow!(
+                "Cannot focus element: Ambiguous query '{}' matched {} candidates",
+                target_clean,
+                search.match_count
+            ));
+        }
+
+        let elem = search
+            .element
+            .ok_or_else(|| anyhow!("Element payload missing"))?;
+        if let Some(ref title) = self
+            .detect_browser(browser.clone())
+            .await?
+            .active_window_title
+        {
+            let _ = self.platform_adapter.focus_window(title).await;
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            let script = format!(
+                "Add-Type -MemberDefinition '[DllImport(\"user32.dll\")] public static extern bool SetCursorPos(int X, int Y); [DllImport(\"user32.dll\")] public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, int dwExtraInfo);' -Name 'Win32Mouse' -Namespace Win32Functions; [Win32Functions.Win32Mouse]::SetCursorPos({}, {}); [Win32Functions.Win32Mouse]::mouse_event(0x0002, 0, 0, 0, 0); [Win32Functions.Win32Mouse]::mouse_event(0x0004, 0, 0, 0, 0);",
+                elem.center_x, elem.center_y
+            );
+            let _ = tokio::process::Command::new("powershell")
+                .args(["-NoProfile", "-Command", &script])
+                .output()
+                .await;
+        }
+
+        let elapsed = start.elapsed().as_millis() as u64;
+        Ok(BrowserDomInteractionResult {
+            success: true,
+            action: "focus".to_string(),
+            element_id: elem.element_id,
+            tag_name: elem.tag_name,
+            text: Some(elem.text),
+            attributes: elem.attributes,
+            message: format!(
+                "Successfully focused DOM element matching '{}'",
+                target_clean
+            ),
+            latency_ms: elapsed,
+        })
+    }
+
+    async fn get_element_text(
+        &self,
+        browser: BrowserType,
+        target: &str,
+    ) -> Result<BrowserDomInteractionResult> {
+        let start = Instant::now();
+        let target_clean = target.trim();
+
+        // 1. Try CDP DOM get_text
+        if let Ok(cdp_target) = cdp::CdpClient::get_active_page_target(9222).await {
+            if let Some(ref ws_url) = cdp_target.websocket_debugger_url {
+                if let Ok(val) =
+                    cdp::CdpClient::evaluate_dom_script(ws_url, target_clean, "get_text").await
+                {
+                    if val
+                        .get("ambiguous")
+                        .and_then(|a| a.as_bool())
+                        .unwrap_or(false)
+                    {
+                        let count = val.get("match_count").and_then(|m| m.as_u64()).unwrap_or(2);
+                        return Err(anyhow!(
+                            "Cannot get text: Ambiguous query '{}' matched {} candidates",
+                            target_clean,
+                            count
+                        ));
+                    }
+                    if let Some(err) = val.get("error").and_then(|e| e.as_str()) {
+                        return Err(anyhow!("Cannot get text: {}", err));
+                    }
+                    if val
+                        .get("success")
+                        .and_then(|s| s.as_bool())
+                        .unwrap_or(false)
+                    {
+                        let elem_id = val
+                            .get("element_id")
+                            .and_then(|s| s.as_str())
+                            .unwrap_or("elem_1")
+                            .to_string();
+                        let tag_name = val
+                            .get("tag_name")
+                            .and_then(|s| s.as_str())
+                            .unwrap_or("div")
+                            .to_string();
+                        let text = val
+                            .get("text")
+                            .and_then(|s| s.as_str())
+                            .map(|s| s.to_string());
+                        let attributes = val.get("attributes").cloned().unwrap_or_default();
+                        let attrs: HashMap<String, String> =
+                            serde_json::from_value(attributes).unwrap_or_default();
+
+                        let elapsed = start.elapsed().as_millis() as u64;
+                        let txt = text.clone().unwrap_or_default();
+                        return Ok(BrowserDomInteractionResult {
+                            success: true,
+                            action: "get_text".to_string(),
+                            element_id: elem_id,
+                            tag_name,
+                            text,
+                            attributes: attrs,
+                            message: format!("Element text: '{}'", txt),
+                            latency_ms: elapsed,
+                        });
+                    }
+                }
+            }
+        }
+
+        // 2. Fallback to UIA search
+        let search = self.find_element(browser, target_clean).await?;
+        if !search.success || search.match_count == 0 {
+            return Err(anyhow!(
+                "Cannot get text: No element found matching '{}'",
+                target_clean
+            ));
+        }
+        if search.ambiguous {
+            return Err(anyhow!(
+                "Cannot get text: Ambiguous query '{}' matched {} candidates",
+                target_clean,
+                search.match_count
+            ));
+        }
+
+        let elem = search
+            .element
+            .ok_or_else(|| anyhow!("Element payload missing"))?;
+        let elapsed = start.elapsed().as_millis() as u64;
+        Ok(BrowserDomInteractionResult {
+            success: true,
+            action: "get_text".to_string(),
+            element_id: elem.element_id,
+            tag_name: elem.tag_name,
+            text: Some(elem.text.clone()),
+            attributes: elem.attributes,
+            message: format!("Element text: '{}'", elem.text),
+            latency_ms: elapsed,
+        })
+    }
+
+    async fn get_element_attributes(
+        &self,
+        browser: BrowserType,
+        target: &str,
+    ) -> Result<BrowserDomInteractionResult> {
+        let start = Instant::now();
+        let target_clean = target.trim();
+
+        // 1. Try CDP DOM get_attributes
+        if let Ok(cdp_target) = cdp::CdpClient::get_active_page_target(9222).await {
+            if let Some(ref ws_url) = cdp_target.websocket_debugger_url {
+                if let Ok(val) =
+                    cdp::CdpClient::evaluate_dom_script(ws_url, target_clean, "get_attributes")
+                        .await
+                {
+                    if val
+                        .get("ambiguous")
+                        .and_then(|a| a.as_bool())
+                        .unwrap_or(false)
+                    {
+                        let count = val.get("match_count").and_then(|m| m.as_u64()).unwrap_or(2);
+                        return Err(anyhow!(
+                            "Cannot get attributes: Ambiguous query '{}' matched {} candidates",
+                            target_clean,
+                            count
+                        ));
+                    }
+                    if let Some(err) = val.get("error").and_then(|e| e.as_str()) {
+                        return Err(anyhow!("Cannot get attributes: {}", err));
+                    }
+                    if val
+                        .get("success")
+                        .and_then(|s| s.as_bool())
+                        .unwrap_or(false)
+                    {
+                        let elem_id = val
+                            .get("element_id")
+                            .and_then(|s| s.as_str())
+                            .unwrap_or("elem_1")
+                            .to_string();
+                        let tag_name = val
+                            .get("tag_name")
+                            .and_then(|s| s.as_str())
+                            .unwrap_or("div")
+                            .to_string();
+                        let text = val
+                            .get("text")
+                            .and_then(|s| s.as_str())
+                            .map(|s| s.to_string());
+                        let attributes = val.get("attributes").cloned().unwrap_or_default();
+                        let attrs: HashMap<String, String> =
+                            serde_json::from_value(attributes).unwrap_or_default();
+
+                        let elapsed = start.elapsed().as_millis() as u64;
+                        return Ok(BrowserDomInteractionResult {
+                            success: true,
+                            action: "get_attributes".to_string(),
+                            element_id: elem_id,
+                            tag_name,
+                            text,
+                            attributes: attrs,
+                            message: "Retrieved DOM element attributes successfully".to_string(),
+                            latency_ms: elapsed,
+                        });
+                    }
+                }
+            }
+        }
+
+        // 2. Fallback to UIA search
+        let search = self.find_element(browser, target_clean).await?;
+        if !search.success || search.match_count == 0 {
+            return Err(anyhow!(
+                "Cannot get attributes: No element found matching '{}'",
+                target_clean
+            ));
+        }
+        if search.ambiguous {
+            return Err(anyhow!(
+                "Cannot get attributes: Ambiguous query '{}' matched {} candidates",
+                target_clean,
+                search.match_count
+            ));
+        }
+
+        let elem = search
+            .element
+            .ok_or_else(|| anyhow!("Element payload missing"))?;
+        let elapsed = start.elapsed().as_millis() as u64;
+        Ok(BrowserDomInteractionResult {
+            success: true,
+            action: "get_attributes".to_string(),
+            element_id: elem.element_id,
+            tag_name: elem.tag_name,
+            text: Some(elem.text),
+            attributes: elem.attributes,
+            message: "Retrieved DOM element attributes successfully".to_string(),
             latency_ms: elapsed,
         })
     }
@@ -873,11 +1658,61 @@ pub struct MockBrowserProvider {
     pub navigation_history: Mutex<Vec<String>>,
     pub history_index: Mutex<usize>,
     pub tabs: Mutex<Vec<BrowserTabInfo>>,
+    pub dom_elements: Mutex<Vec<BrowserDomElement>>,
     pub fail_on_navigate: Mutex<bool>,
 }
 
 impl MockBrowserProvider {
     pub fn new() -> Self {
+        let default_elements = vec![
+            BrowserDomElement {
+                element_id: "search_input_id".to_string(),
+                tag_name: "input".to_string(),
+                name: "search box".to_string(),
+                text: "".to_string(),
+                control_type: "Edit".to_string(),
+                attributes: {
+                    let mut m = HashMap::new();
+                    m.insert("id".to_string(), "search_input_id".to_string());
+                    m.insert("name".to_string(), "q".to_string());
+                    m
+                },
+                bounds: Some(Rect {
+                    x: 100,
+                    y: 100,
+                    width: 200,
+                    height: 30,
+                }),
+                center_x: 200,
+                center_y: 115,
+                enabled: true,
+                focused: false,
+            },
+            BrowserDomElement {
+                element_id: "login_btn_id".to_string(),
+                tag_name: "button".to_string(),
+                name: "login button".to_string(),
+                text: "Sign In".to_string(),
+                control_type: "Button".to_string(),
+                attributes: {
+                    let mut m = HashMap::new();
+                    m.insert("id".to_string(), "login_btn_id".to_string());
+                    m.insert("class".to_string(), "btn-primary".to_string());
+                    m
+                },
+                bounds: Some(Rect {
+                    x: 350,
+                    y: 100,
+                    width: 100,
+                    height: 30,
+                }),
+                center_x: 400,
+                center_y: 115,
+                enabled: true,
+                focused: false,
+            },
+        ];
+
         Self {
             running: Mutex::new(false),
             process_id: Mutex::new(None),
@@ -892,6 +1727,7 @@ impl MockBrowserProvider {
                 url: Some("https://google.com".to_string()),
                 active: true,
             }]),
+            dom_elements: Mutex::new(default_elements),
             fail_on_navigate: Mutex::new(false),
         }
     }
@@ -904,7 +1740,12 @@ impl MockBrowserProvider {
                 window_title: window_title.to_string(),
                 process_name: "chrome.exe".to_string(),
                 process_id: pid,
-                bounds: Some(Rect { x: 0, y: 0, width: 1280, height: 720 }),
+                bounds: Some(Rect {
+                    x: 0,
+                    y: 0,
+                    width: 1280,
+                    height: 720,
+                }),
                 foreground: true,
             });
         }
@@ -930,7 +1771,11 @@ impl BrowserProvider for MockBrowserProvider {
             process_name: browser.executable_name().to_string(),
             process_id: pid,
             running,
-            window_count: if running { self.tabs.lock().unwrap().len() } else { 0 },
+            window_count: if running {
+                self.tabs.lock().unwrap().len()
+            } else {
+                0
+            },
             foreground: win.as_ref().map(|w| w.foreground).unwrap_or(false),
             active_window_title: win.map(|w| w.window_title),
         })
@@ -946,7 +1791,12 @@ impl BrowserProvider for MockBrowserProvider {
                 window_title: format!("New Tab - {}", browser.name()),
                 process_name: browser.executable_name().to_string(),
                 process_id: 1234,
-                bounds: Some(Rect { x: 0, y: 0, width: 1280, height: 720 }),
+                bounds: Some(Rect {
+                    x: 0,
+                    y: 0,
+                    width: 1280,
+                    height: 720,
+                }),
                 foreground: true,
             });
         }
@@ -1003,7 +1853,10 @@ impl BrowserProvider for MockBrowserProvider {
     async fn back(&self, browser: BrowserType) -> Result<BrowserActionResult> {
         let running = *self.running.lock().unwrap();
         if !running {
-            return Err(anyhow!("Cannot navigate back: Browser '{}' is not running", browser.name()));
+            return Err(anyhow!(
+                "Cannot navigate back: Browser '{}' is not running",
+                browser.name()
+            ));
         }
 
         let mut idx = self.history_index.lock().unwrap();
@@ -1027,7 +1880,10 @@ impl BrowserProvider for MockBrowserProvider {
     async fn forward(&self, browser: BrowserType) -> Result<BrowserActionResult> {
         let running = *self.running.lock().unwrap();
         if !running {
-            return Err(anyhow!("Cannot navigate forward: Browser '{}' is not running", browser.name()));
+            return Err(anyhow!(
+                "Cannot navigate forward: Browser '{}' is not running",
+                browser.name()
+            ));
         }
 
         let mut idx = self.history_index.lock().unwrap();
@@ -1051,7 +1907,10 @@ impl BrowserProvider for MockBrowserProvider {
     async fn reload(&self, browser: BrowserType) -> Result<BrowserActionResult> {
         let running = *self.running.lock().unwrap();
         if !running {
-            return Err(anyhow!("Cannot reload page: Browser '{}' is not running", browser.name()));
+            return Err(anyhow!(
+                "Cannot reload page: Browser '{}' is not running",
+                browser.name()
+            ));
         }
 
         Ok(BrowserActionResult {
@@ -1068,7 +1927,10 @@ impl BrowserProvider for MockBrowserProvider {
     async fn list_tabs(&self, browser: BrowserType) -> Result<Vec<BrowserTabInfo>> {
         let running = *self.running.lock().unwrap();
         if !running {
-            return Err(anyhow!("Cannot list tabs: Browser '{}' is not running", browser.name()));
+            return Err(anyhow!(
+                "Cannot list tabs: Browser '{}' is not running",
+                browser.name()
+            ));
         }
         Ok(self.tabs.lock().unwrap().clone())
     }
@@ -1103,7 +1965,10 @@ impl BrowserProvider for MockBrowserProvider {
     async fn switch_tab(&self, browser: BrowserType, target: TabTarget) -> Result<BrowserTabInfo> {
         let running = *self.running.lock().unwrap();
         if !running {
-            return Err(anyhow!("Cannot switch tab: Browser '{}' is not running", browser.name()));
+            return Err(anyhow!(
+                "Cannot switch tab: Browser '{}' is not running",
+                browser.name()
+            ));
         }
 
         let mut tabs = self.tabs.lock().unwrap();
@@ -1114,13 +1979,18 @@ impl BrowserProvider for MockBrowserProvider {
         let target_idx = match target {
             TabTarget::Index(idx) => {
                 if idx == 0 || idx > tabs.len() {
-                    return Err(anyhow!("Invalid tab index {}: Available tabs count is {}", idx, tabs.len()));
+                    return Err(anyhow!(
+                        "Invalid tab index {}: Available tabs count is {}",
+                        idx,
+                        tabs.len()
+                    ));
                 }
                 idx - 1
             }
             TabTarget::Title(ref query) => {
                 let q_lower = query.to_lowercase();
-                tabs.iter().position(|t| t.title.to_lowercase().contains(&q_lower))
+                tabs.iter()
+                    .position(|t| t.title.to_lowercase().contains(&q_lower))
                     .ok_or_else(|| anyhow!("No tab found matching title query '{}'", query))?
             }
             TabTarget::Active => 0,
@@ -1133,10 +2003,17 @@ impl BrowserProvider for MockBrowserProvider {
         Ok(tabs[target_idx].clone())
     }
 
-    async fn close_tab(&self, browser: BrowserType, target: Option<TabTarget>) -> Result<BrowserActionResult> {
+    async fn close_tab(
+        &self,
+        browser: BrowserType,
+        target: Option<TabTarget>,
+    ) -> Result<BrowserActionResult> {
         let running = *self.running.lock().unwrap();
         if !running {
-            return Err(anyhow!("Cannot close tab: Browser '{}' is not running", browser.name()));
+            return Err(anyhow!(
+                "Cannot close tab: Browser '{}' is not running",
+                browser.name()
+            ));
         }
 
         let mut tabs = self.tabs.lock().unwrap();
@@ -1148,13 +2025,18 @@ impl BrowserProvider for MockBrowserProvider {
             match tgt {
                 TabTarget::Index(idx) => {
                     if idx == 0 || idx > tabs.len() {
-                        return Err(anyhow!("Invalid tab index {}: Available tabs count is {}", idx, tabs.len()));
+                        return Err(anyhow!(
+                            "Invalid tab index {}: Available tabs count is {}",
+                            idx,
+                            tabs.len()
+                        ));
                     }
                     idx - 1
                 }
                 TabTarget::Title(ref query) => {
                     let q_lower = query.to_lowercase();
-                    tabs.iter().position(|t| t.title.to_lowercase().contains(&q_lower))
+                    tabs.iter()
+                        .position(|t| t.title.to_lowercase().contains(&q_lower))
                         .ok_or_else(|| anyhow!("No tab found matching title query '{}'", query))?
                 }
                 TabTarget::Active => tabs.iter().position(|t| t.active).unwrap_or(0),
@@ -1182,6 +2064,206 @@ impl BrowserProvider for MockBrowserProvider {
             latency_ms: 10,
         })
     }
+
+    // --- M09.03 Mock Implementations ---
+
+    async fn find_element(
+        &self,
+        _browser: BrowserType,
+        query: &str,
+    ) -> Result<BrowserDomSearchResult> {
+        let q_lower = query.trim().to_lowercase();
+        if q_lower.is_empty() {
+            return Err(anyhow!("DOM element search query cannot be empty"));
+        }
+
+        let dom = self.dom_elements.lock().unwrap();
+        let matches: Vec<_> = dom
+            .iter()
+            .filter(|e| {
+                e.name.to_lowercase().contains(&q_lower)
+                    || e.text.to_lowercase().contains(&q_lower)
+                    || e.element_id.to_lowercase().contains(&q_lower)
+                    || e.tag_name.to_lowercase().contains(&q_lower)
+                    || e.attributes
+                        .values()
+                        .any(|v| v.to_lowercase().contains(&q_lower))
+            })
+            .cloned()
+            .collect();
+
+        if matches.is_empty() {
+            Ok(BrowserDomSearchResult {
+                success: false,
+                query: query.to_string(),
+                match_count: 0,
+                ambiguous: false,
+                element: None,
+                candidates: vec![],
+                message: format!("No DOM element found matching '{}'", query),
+                latency_ms: 5,
+            })
+        } else if matches.len() == 1 {
+            Ok(BrowserDomSearchResult {
+                success: true,
+                query: query.to_string(),
+                match_count: 1,
+                ambiguous: false,
+                element: Some(matches[0].clone()),
+                candidates: matches,
+                message: format!("Found 1 matching element for query '{}'", query),
+                latency_ms: 5,
+            })
+        } else {
+            Ok(BrowserDomSearchResult {
+                success: true,
+                query: query.to_string(),
+                match_count: matches.len(),
+                ambiguous: true,
+                element: None,
+                candidates: matches.clone(),
+                message: format!(
+                    "Found {} ambiguous matching elements for query '{}'",
+                    matches.len(),
+                    query
+                ),
+                latency_ms: 5,
+            })
+        }
+    }
+
+    async fn click_element(
+        &self,
+        browser: BrowserType,
+        target: &str,
+    ) -> Result<BrowserDomInteractionResult> {
+        let search = self.find_element(browser, target).await?;
+        if !search.success || search.match_count == 0 {
+            return Err(anyhow!(
+                "Cannot click element: No element found matching '{}'",
+                target
+            ));
+        }
+        if search.ambiguous {
+            return Err(anyhow!(
+                "Cannot click element: Ambiguous query '{}' matched {} candidates",
+                target,
+                search.match_count
+            ));
+        }
+
+        let elem = search.element.unwrap();
+        Ok(BrowserDomInteractionResult {
+            success: true,
+            action: "click".to_string(),
+            element_id: elem.element_id,
+            tag_name: elem.tag_name,
+            text: Some(elem.text),
+            attributes: elem.attributes,
+            message: format!("Successfully clicked DOM element matching '{}'", target),
+            latency_ms: 5,
+        })
+    }
+
+    async fn focus_element(
+        &self,
+        browser: BrowserType,
+        target: &str,
+    ) -> Result<BrowserDomInteractionResult> {
+        let search = self.find_element(browser, target).await?;
+        if !search.success || search.match_count == 0 {
+            return Err(anyhow!(
+                "Cannot focus element: No element found matching '{}'",
+                target
+            ));
+        }
+        if search.ambiguous {
+            return Err(anyhow!(
+                "Cannot focus element: Ambiguous query '{}' matched {} candidates",
+                target,
+                search.match_count
+            ));
+        }
+
+        let mut elem = search.element.unwrap();
+        elem.focused = true;
+        Ok(BrowserDomInteractionResult {
+            success: true,
+            action: "focus".to_string(),
+            element_id: elem.element_id,
+            tag_name: elem.tag_name,
+            text: Some(elem.text),
+            attributes: elem.attributes,
+            message: format!("Successfully focused DOM element matching '{}'", target),
+            latency_ms: 5,
+        })
+    }
+
+    async fn get_element_text(
+        &self,
+        browser: BrowserType,
+        target: &str,
+    ) -> Result<BrowserDomInteractionResult> {
+        let search = self.find_element(browser, target).await?;
+        if !search.success || search.match_count == 0 {
+            return Err(anyhow!(
+                "Cannot get text: No element found matching '{}'",
+                target
+            ));
+        }
+        if search.ambiguous {
+            return Err(anyhow!(
+                "Cannot get text: Ambiguous query '{}' matched {} candidates",
+                target,
+                search.match_count
+            ));
+        }
+
+        let elem = search.element.unwrap();
+        Ok(BrowserDomInteractionResult {
+            success: true,
+            action: "get_text".to_string(),
+            element_id: elem.element_id,
+            tag_name: elem.tag_name,
+            text: Some(elem.text.clone()),
+            attributes: elem.attributes,
+            message: format!("Element text: '{}'", elem.text),
+            latency_ms: 5,
+        })
+    }
+
+    async fn get_element_attributes(
+        &self,
+        browser: BrowserType,
+        target: &str,
+    ) -> Result<BrowserDomInteractionResult> {
+        let search = self.find_element(browser, target).await?;
+        if !search.success || search.match_count == 0 {
+            return Err(anyhow!(
+                "Cannot get attributes: No element found matching '{}'",
+                target
+            ));
+        }
+        if search.ambiguous {
+            return Err(anyhow!(
+                "Cannot get attributes: Ambiguous query '{}' matched {} candidates",
+                target,
+                search.match_count
+            ));
+        }
+
+        let elem = search.element.unwrap();
+        Ok(BrowserDomInteractionResult {
+            success: true,
+            action: "get_attributes".to_string(),
+            element_id: elem.element_id,
+            tag_name: elem.tag_name,
+            text: Some(elem.text),
+            attributes: elem.attributes,
+            message: "Retrieved DOM element attributes successfully".to_string(),
+            latency_ms: 5,
+        })
+    }
 }
 
 // ============================================================
@@ -1201,15 +2283,26 @@ mod tests {
         assert_eq!(BrowserType::from_str("brave"), BrowserType::Brave);
 
         assert_eq!(BrowserType::Chrome.name(), "Google Chrome");
-        assert!(BrowserType::Chrome.process_match_names().contains(&"chrome"));
+        assert!(BrowserType::Chrome
+            .process_match_names()
+            .contains(&"chrome"));
     }
 
     #[test]
     fn test_url_normalization_valid() {
         assert_eq!(normalize_url("google.com").unwrap(), "https://google.com");
-        assert_eq!(normalize_url("www.linkedin.com").unwrap(), "https://www.linkedin.com");
-        assert_eq!(normalize_url("https://github.com/rust-lang").unwrap(), "https://github.com/rust-lang");
-        assert_eq!(normalize_url("http://localhost:8080").unwrap(), "http://localhost:8080");
+        assert_eq!(
+            normalize_url("www.linkedin.com").unwrap(),
+            "https://www.linkedin.com"
+        );
+        assert_eq!(
+            normalize_url("https://github.com/rust-lang").unwrap(),
+            "https://github.com/rust-lang"
+        );
+        assert_eq!(
+            normalize_url("http://localhost:8080").unwrap(),
+            "http://localhost:8080"
+        );
     }
 
     #[test]
@@ -1228,10 +2321,16 @@ mod tests {
         assert!(!status.running);
 
         let mock_running = MockBrowserProvider::new().with_running(true, 5678, "Google Chrome");
-        let status2 = mock_running.detect_browser(BrowserType::Chrome).await.unwrap();
+        let status2 = mock_running
+            .detect_browser(BrowserType::Chrome)
+            .await
+            .unwrap();
         assert!(status2.running);
         assert_eq!(status2.process_id, Some(5678));
-        assert_eq!(status2.active_window_title, Some("Google Chrome".to_string()));
+        assert_eq!(
+            status2.active_window_title,
+            Some("Google Chrome".to_string())
+        );
     }
 
     #[tokio::test]
@@ -1253,7 +2352,6 @@ mod tests {
     async fn test_mock_browser_provider_history_and_tabs() {
         let mock = MockBrowserProvider::new().with_running(true, 1234, "Google Chrome");
 
-        // Test navigation history & back/forward
         let req1 = BrowserNavigationRequest {
             url: "google.com".to_string(),
             browser: BrowserType::Chrome,
@@ -1267,25 +2365,42 @@ mod tests {
         mock.navigate(req1).await.unwrap();
         mock.navigate(req2).await.unwrap();
 
-        assert_eq!(mock.current_url.lock().unwrap().as_deref(), Some("https://wikipedia.org"));
+        assert_eq!(
+            mock.current_url.lock().unwrap().as_deref(),
+            Some("https://wikipedia.org")
+        );
 
         let back_res = mock.back(BrowserType::Chrome).await.unwrap();
         assert!(back_res.success);
-        assert_eq!(mock.current_url.lock().unwrap().as_deref(), Some("https://google.com"));
+        assert_eq!(
+            mock.current_url.lock().unwrap().as_deref(),
+            Some("https://google.com")
+        );
 
         let fwd_res = mock.forward(BrowserType::Chrome).await.unwrap();
         assert!(fwd_res.success);
-        assert_eq!(mock.current_url.lock().unwrap().as_deref(), Some("https://wikipedia.org"));
+        assert_eq!(
+            mock.current_url.lock().unwrap().as_deref(),
+            Some("https://wikipedia.org")
+        );
 
-        // Test tabs
-        let t2 = mock.new_tab(BrowserType::Chrome, Some("https://rust-lang.org".to_string())).await.unwrap();
+        let t2 = mock
+            .new_tab(
+                BrowserType::Chrome,
+                Some("https://rust-lang.org".to_string()),
+            )
+            .await
+            .unwrap();
         assert_eq!(t2.tab_id, 2);
         assert!(t2.active);
 
         let tabs = mock.list_tabs(BrowserType::Chrome).await.unwrap();
         assert_eq!(tabs.len(), 2);
 
-        let switched = mock.switch_tab(BrowserType::Chrome, TabTarget::Index(1)).await.unwrap();
+        let switched = mock
+            .switch_tab(BrowserType::Chrome, TabTarget::Index(1))
+            .await
+            .unwrap();
         assert_eq!(switched.tab_id, 1);
         assert!(switched.active);
 
@@ -1293,5 +2408,236 @@ mod tests {
         assert!(close_res.success);
         let tabs_after = mock.list_tabs(BrowserType::Chrome).await.unwrap();
         assert_eq!(tabs_after.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_m09_03_mock_dom_element_finding_and_interaction() {
+        let mock = MockBrowserProvider::new().with_running(true, 1234, "Google Chrome");
+
+        // 1. Find search box
+        let search = mock
+            .find_element(BrowserType::Chrome, "search box")
+            .await
+            .unwrap();
+        assert!(search.success);
+        assert_eq!(search.match_count, 1);
+        assert!(!search.ambiguous);
+        assert_eq!(
+            search.element.as_ref().unwrap().element_id,
+            "search_input_id"
+        );
+
+        // 2. Click button
+        let click_res = mock
+            .click_element(BrowserType::Chrome, "Sign In")
+            .await
+            .unwrap();
+        assert!(click_res.success);
+        assert_eq!(click_res.action, "click");
+        assert_eq!(click_res.element_id, "login_btn_id");
+
+        // 3. Focus input
+        let focus_res = mock
+            .focus_element(BrowserType::Chrome, "search box")
+            .await
+            .unwrap();
+        assert!(focus_res.success);
+        assert_eq!(focus_res.action, "focus");
+
+        // 4. Get text
+        let text_res = mock
+            .get_element_text(BrowserType::Chrome, "Sign In")
+            .await
+            .unwrap();
+        assert!(text_res.success);
+        assert_eq!(text_res.text.as_deref(), Some("Sign In"));
+
+        // 5. Nonexistent element -> not found
+        let not_found = mock
+            .find_element(BrowserType::Chrome, "nonexistent_btn")
+            .await
+            .unwrap();
+        assert!(!not_found.success);
+        assert_eq!(not_found.match_count, 0);
+
+        // 6. Ambiguity test: add duplicate element
+        mock.dom_elements.lock().unwrap().push(BrowserDomElement {
+            element_id: "login_btn_id_2".to_string(),
+            tag_name: "button".to_string(),
+            name: "login button 2".to_string(),
+            text: "Sign In".to_string(),
+            control_type: "Button".to_string(),
+            attributes: HashMap::new(),
+            bounds: None,
+            center_x: 0,
+            center_y: 0,
+            enabled: true,
+            focused: false,
+        });
+
+        let amb = mock
+            .find_element(BrowserType::Chrome, "Sign In")
+            .await
+            .unwrap();
+        assert!(amb.success);
+        assert!(amb.ambiguous);
+        assert_eq!(amb.match_count, 2);
+
+        // 7. Ambiguous click refusal
+        let err = mock.click_element(BrowserType::Chrome, "Sign In").await;
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn test_cdp_dom_search_result_deserialization() {
+        // Test A: CDP find result with 1 element
+        let json_a = serde_json::json!({
+            "success": true,
+            "query": "Submit",
+            "match_count": 1,
+            "ambiguous": false,
+            "candidates": [{
+                "element_id": "submit-btn",
+                "tag_name": "button",
+                "name": "Submit",
+                "text": "Submit",
+                "control_type": "Button",
+                "attributes": { "id": "submit-btn", "tag": "button", "type": "submit" },
+                "bounds": { "x": 10, "y": 20, "width": 100, "height": 30, "center_x": 60, "center_y": 35 },
+                "center_x": 60,
+                "center_y": 35,
+                "enabled": true,
+                "focused": false
+            }],
+            "element": {
+                "element_id": "submit-btn",
+                "tag_name": "button",
+                "name": "Submit",
+                "text": "Submit",
+                "control_type": "Button",
+                "attributes": { "id": "submit-btn", "tag": "button", "type": "submit" },
+                "bounds": { "x": 10, "y": 20, "width": 100, "height": 30, "center_x": 60, "center_y": 35 },
+                "center_x": 60,
+                "center_y": 35,
+                "enabled": true,
+                "focused": false
+            },
+            "message": "Found 1 matching element(s)",
+            "latency_ms": 0
+        });
+
+        let res_a: BrowserDomSearchResult = serde_json::from_value(json_a).unwrap();
+        assert!(res_a.success);
+        assert_eq!(res_a.query, "Submit");
+        assert_eq!(res_a.match_count, 1);
+        assert!(!res_a.ambiguous);
+        assert!(res_a.element.is_some());
+        assert_eq!(res_a.element.as_ref().unwrap().element_id, "submit-btn");
+        assert_eq!(res_a.message, "Found 1 matching element(s)");
+
+        // Test B: CDP find result with 0 elements
+        let json_b = serde_json::json!({
+            "success": false,
+            "query": "Nonexistent",
+            "match_count": 0,
+            "ambiguous": false,
+            "candidates": [],
+            "element": null,
+            "message": "No DOM element found matching 'Nonexistent'",
+            "latency_ms": 0
+        });
+
+        let res_b: BrowserDomSearchResult = serde_json::from_value(json_b).unwrap();
+        assert!(!res_b.success);
+        assert_eq!(res_b.query, "Nonexistent");
+        assert_eq!(res_b.match_count, 0);
+        assert!(!res_b.ambiguous);
+        assert!(res_b.element.is_none());
+        assert_eq!(res_b.message, "No DOM element found matching 'Nonexistent'");
+
+        // Test C: CDP find result with 2 elements (Ambiguous)
+        let json_c = serde_json::json!({
+            "success": true,
+            "query": "Duplicate",
+            "match_count": 2,
+            "ambiguous": true,
+            "candidates": [
+                {
+                    "element_id": "dup1",
+                    "tag_name": "button",
+                    "name": "Duplicate",
+                    "text": "Duplicate",
+                    "control_type": "Button",
+                    "attributes": { "id": "dup1", "class": "duplicate" },
+                    "bounds": null,
+                    "center_x": 0,
+                    "center_y": 0,
+                    "enabled": true,
+                    "focused": false
+                },
+                {
+                    "element_id": "dup2",
+                    "tag_name": "button",
+                    "name": "Duplicate",
+                    "text": "Duplicate",
+                    "control_type": "Button",
+                    "attributes": { "id": "dup2", "class": "duplicate" },
+                    "bounds": null,
+                    "center_x": 0,
+                    "center_y": 0,
+                    "enabled": true,
+                    "focused": false
+                }
+            ],
+            "element": null,
+            "message": "Found 2 matching element(s)",
+            "latency_ms": 0
+        });
+
+        let res_c: BrowserDomSearchResult = serde_json::from_value(json_c).unwrap();
+        assert!(res_c.success);
+        assert_eq!(res_c.query, "Duplicate");
+        assert_eq!(res_c.match_count, 2);
+        assert!(res_c.ambiguous);
+        assert_eq!(res_c.candidates.len(), 2);
+
+        // Test D: Verify deserialization directly from JS evaluation payload string
+        let raw_js_payload = r##"{
+            "success": true,
+            "query": "#name-input",
+            "match_count": 1,
+            "ambiguous": false,
+            "candidates": [{
+                "element_id": "name-input",
+                "tag_name": "input",
+                "name": "Name",
+                "text": "",
+                "control_type": "Edit",
+                "attributes": { "id": "name-input", "name": "Name" },
+                "bounds": null,
+                "center_x": 100,
+                "center_y": 50,
+                "enabled": true,
+                "focused": true
+            }],
+            "element": {
+                "element_id": "name-input",
+                "tag_name": "input",
+                "name": "Name",
+                "text": "",
+                "control_type": "Edit",
+                "attributes": { "id": "name-input", "name": "Name" },
+                "bounds": null,
+                "center_x": 100,
+                "center_y": 50,
+                "enabled": true,
+                "focused": true
+            },
+            "message": "Found 1 matching element(s)",
+            "latency_ms": 0
+        }"##;
+
+        let res_d: BrowserDomSearchResult = serde_json::from_str(raw_js_payload).unwrap();
+        assert_eq!(res_d.element.as_ref().unwrap().element_id, "name-input");
     }
 }

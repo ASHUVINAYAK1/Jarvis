@@ -9,8 +9,12 @@ use tracing::info;
 #[cfg(target_os = "windows")]
 use windows::{
     Win32::Foundation::HWND,
-    Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED},
-    Win32::UI::Accessibility::{CUIAutomation, IUIAutomation, IUIAutomationElement, IUIAutomationTreeWalker},
+    Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED,
+    },
+    Win32::UI::Accessibility::{
+        CUIAutomation, IUIAutomation, IUIAutomationElement, IUIAutomationTreeWalker,
+    },
     Win32::UI::WindowsAndMessaging::{GetDesktopWindow, GetForegroundWindow},
 };
 
@@ -60,6 +64,68 @@ pub fn control_type_to_string(control_type_id: i32) -> &'static str {
     }
 }
 
+static BROWSER_HWND_FOUND: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+#[cfg(target_os = "windows")]
+unsafe extern "system" fn enum_browser_windows_cb(
+    hwnd: windows::Win32::Foundation::HWND,
+    _: windows::Win32::Foundation::LPARAM,
+) -> windows::Win32::Foundation::BOOL {
+    use windows::Win32::UI::WindowsAndMessaging::{GetClassNameW, GetWindowTextW, IsWindowVisible};
+    if IsWindowVisible(hwnd).as_bool() {
+        let mut class_buf = [0u16; 256];
+        let class_len = GetClassNameW(hwnd, &mut class_buf);
+        let class_name = if class_len > 0 {
+            String::from_utf16_lossy(&class_buf[..class_len as usize]).to_lowercase()
+        } else {
+            String::new()
+        };
+
+        let mut buf = [0u16; 512];
+        let len = GetWindowTextW(hwnd, &mut buf);
+        let title = if len > 0 {
+            String::from_utf16_lossy(&buf[..len as usize])
+        } else {
+            String::new()
+        };
+        let t_lower = title.to_lowercase();
+
+        if class_name.contains("chrome_widgetwin")
+            || class_name.contains("mozilla")
+            || t_lower.contains("chrome")
+            || t_lower.contains("edge")
+            || t_lower.contains("firefox")
+            || t_lower.contains("dom test")
+            || t_lower.contains("restore")
+            || t_lower.contains("localhost")
+            || t_lower.contains("http")
+        {
+            BROWSER_HWND_FOUND.store(hwnd.0 as usize, std::sync::atomic::Ordering::SeqCst);
+            return windows::Win32::Foundation::BOOL(0);
+        }
+    }
+    windows::Win32::Foundation::BOOL(1)
+}
+
+fn find_browser_window_handle() -> Option<windows::Win32::Foundation::HWND> {
+    use windows::Win32::UI::WindowsAndMessaging::EnumWindows;
+    BROWSER_HWND_FOUND.store(0, std::sync::atomic::Ordering::SeqCst);
+    unsafe {
+        let _ = EnumWindows(
+            Some(enum_browser_windows_cb),
+            windows::Win32::Foundation::LPARAM(0),
+        );
+    }
+    let val = BROWSER_HWND_FOUND.load(std::sync::atomic::Ordering::SeqCst);
+    if val != 0 {
+        Some(windows::Win32::Foundation::HWND(
+            val as *mut std::ffi::c_void,
+        ))
+    } else {
+        None
+    }
+}
+
 /// Native Windows implementation inspecting active window accessibility tree via UIA.
 #[cfg(target_os = "windows")]
 pub fn inspect_active_window_uia(
@@ -73,12 +139,12 @@ pub fn inspect_active_window_uia(
     }
 
     // 2. Instantiate CUIAutomation COM class
-    let automation: IUIAutomation = unsafe {
-        CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER)?
-    };
+    let automation: IUIAutomation =
+        unsafe { CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER)? };
 
-    // 3. Get active foreground window HWND, falling back to desktop window
-    let mut hwnd: HWND = unsafe { GetForegroundWindow() };
+    // 3. Find target window HWND: prefer browser window handle if present, else active foreground window
+    let mut hwnd: HWND =
+        find_browser_window_handle().unwrap_or_else(|| unsafe { GetForegroundWindow() });
     if hwnd.0.is_null() {
         hwnd = unsafe { GetDesktopWindow() };
     }
@@ -86,10 +152,9 @@ pub fn inspect_active_window_uia(
     // 4. Get root UIA element for target window
     let root_element: IUIAutomationElement = unsafe {
         if !hwnd.0.is_null() {
-            match automation.ElementFromHandle(hwnd) {
-                Ok(elem) => elem,
-                Err(_) => automation.GetRootElement()?,
-            }
+            automation
+                .ElementFromHandle(hwnd)
+                .unwrap_or_else(|_| automation.GetRootElement().unwrap())
         } else {
             automation.GetRootElement()?
         }
@@ -110,8 +175,12 @@ pub fn inspect_active_window_uia(
             .unwrap_or_else(|_| "unknown.exe".to_string())
     };
 
-    // 5. Get ControlViewWalker for safe UI element traversal
-    let walker: IUIAutomationTreeWalker = unsafe { automation.ControlViewWalker()? };
+    // 5. Get RawViewWalker for complete UI element traversal (includes HTML DOM elements in browser renderers)
+    let walker: IUIAutomationTreeWalker = unsafe {
+        automation
+            .RawViewWalker()
+            .or_else(|_| automation.ControlViewWalker())?
+    };
 
     let mut collected_elements = Vec::new();
     let mut total_scanned = 0;
@@ -199,17 +268,34 @@ pub fn inspect_active_window_uia(
 #[cfg(target_os = "windows")]
 fn extract_ui_element_info(element: &IUIAutomationElement) -> Option<UiElement> {
     unsafe {
-        let name = element.CurrentName().map(|b| b.to_string()).unwrap_or_default();
-        let automation_id = element.CurrentAutomationId().map(|b| b.to_string()).unwrap_or_default();
-        let class_name = element.CurrentClassName().map(|b| b.to_string()).unwrap_or_default();
+        let name = element
+            .CurrentName()
+            .map(|b| b.to_string())
+            .unwrap_or_default();
+        let automation_id = element
+            .CurrentAutomationId()
+            .map(|b| b.to_string())
+            .unwrap_or_default();
+        let class_name = element
+            .CurrentClassName()
+            .map(|b| b.to_string())
+            .unwrap_or_default();
 
         let control_type_id = element.CurrentControlType().map(|id| id.0).unwrap_or(0);
         let control_type = control_type_to_string(control_type_id).to_string();
 
         let rect = element.CurrentBoundingRectangle().ok()?;
 
-        let width = if rect.right >= rect.left { (rect.right - rect.left) as u32 } else { 0 };
-        let height = if rect.bottom >= rect.top { (rect.bottom - rect.top) as u32 } else { 0 };
+        let width = if rect.right >= rect.left {
+            (rect.right - rect.left) as u32
+        } else {
+            0
+        };
+        let height = if rect.bottom >= rect.top {
+            (rect.bottom - rect.top) as u32
+        } else {
+            0
+        };
 
         // Skip invalid 0x0 or collapsed offscreen elements unless named
         if width == 0 && height == 0 && name.is_empty() {
@@ -223,9 +309,18 @@ fn extract_ui_element_info(element: &IUIAutomationElement) -> Option<UiElement> 
             height,
         };
 
-        let enabled = element.CurrentIsEnabled().map(|b| b.as_bool()).unwrap_or(true);
-        let offscreen = element.CurrentIsOffscreen().map(|b| b.as_bool()).unwrap_or(false);
-        let focused = element.CurrentHasKeyboardFocus().map(|b| b.as_bool()).unwrap_or(false);
+        let enabled = element
+            .CurrentIsEnabled()
+            .map(|b| b.as_bool())
+            .unwrap_or(true);
+        let offscreen = element
+            .CurrentIsOffscreen()
+            .map(|b| b.as_bool())
+            .unwrap_or(false);
+        let focused = element
+            .CurrentHasKeyboardFocus()
+            .map(|b| b.as_bool())
+            .unwrap_or(false);
 
         Some(UiElement::new(
             name,

@@ -116,13 +116,76 @@ impl Orchestrator {
         &self.task_repository
     }
 
+    /// Centralized normalization of user commands for robust intent pattern matching.
+    /// Handles STT transcription variations (capitalization, commas, colons, trailing periods)
+    /// while carefully preserving URLs, CSS selectors (#id, .class), and element queries.
+    pub fn normalize_command_for_intent_matching(command: &str) -> String {
+        let s = command.trim();
+        if s.is_empty() {
+            return String::new();
+        }
+
+        let lower = s.to_lowercase();
+
+        // If it's a URL navigation command ("go to ...", "navigate to ...", "http://...", "https://...")
+        // preserve the URL structure (colons, slashes, query params) and only strip trailing sentence punctuation.
+        if lower.starts_with("go to ")
+            || lower.starts_with("navigate to ")
+            || lower.starts_with("browser_navigate ")
+            || lower.starts_with("browser navigate ")
+            || lower.contains("http://")
+            || lower.contains("https://")
+        {
+            let trimmed = lower.trim_end_matches(['.', '!', '?', ';']).trim();
+            return trimmed.split_whitespace().collect::<Vec<_>>().join(" ");
+        }
+
+        // For general intent matching: replace punctuation (, : ; ! ? " ' ( )) with spaces
+        // Note: preserve '#', '_', '-', '[', ']', '=' and '.' when inside selectors or numbers
+        let mut result = String::with_capacity(lower.len());
+        let chars: Vec<char> = lower.chars().collect();
+        let len = chars.len();
+
+        for i in 0..len {
+            let c = chars[i];
+            match c {
+                '\'' => {
+                    let prev_is_alnum = i > 0 && chars[i - 1].is_alphanumeric();
+                    let next_is_alnum = i + 1 < len && chars[i + 1].is_alphanumeric();
+                    if prev_is_alnum && next_is_alnum {
+                        result.push('\'');
+                    } else {
+                        result.push(' ');
+                    }
+                }
+                ',' | ':' | ';' | '!' | '?' | '"' | '(' | ')' => {
+                    result.push(' ');
+                }
+                '.' => {
+                    let next_is_alnum = i + 1 < len && chars[i + 1].is_alphanumeric();
+                    if next_is_alnum {
+                        result.push('.');
+                    } else {
+                        result.push(' ');
+                    }
+                }
+                _ => {
+                    result.push(c);
+                }
+            }
+        }
+
+        result.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
     /// Parse a natural language or structured command into a tool intent.
     pub fn parse_intent(&self, command: &str) -> Result<ParsedIntent> {
-        let text = command.trim().to_lowercase();
-        if text.is_empty() {
+        let raw_trimmed = command.trim();
+        if raw_trimmed.is_empty() {
             return Err(anyhow!("Empty command"));
         }
-        let clean_text = text.trim_end_matches(['?', '.', '!', ';']).trim();
+        let clean_text = Self::normalize_command_for_intent_matching(command);
+        let text = clean_text.clone();
 
         // 1. Explicit tool names & window list commands
         if text == "list_windows"
@@ -161,7 +224,12 @@ impl Orchestrator {
 
         // 3. Focus window commands
         if text.starts_with("focus_window ")
-            || text.starts_with("focus ")
+            || (text.starts_with("focus ")
+                && !text.contains("field")
+                && !text.contains("box")
+                && !text.contains("input")
+                && !text.contains("element")
+                && !text.contains("button"))
             || (text.starts_with("switch to ") && !text.contains("tab"))
             || text.starts_with("bring ")
         {
@@ -528,12 +596,15 @@ impl Orchestrator {
                 let rest = if clean_text.starts_with("switch to tab ") {
                     clean_text.trim_start_matches("switch to tab ")
                 } else if clean_text.starts_with("switch to the ") {
-                    clean_text.trim_start_matches("switch to the ").trim_end_matches(" tab")
+                    clean_text
+                        .trim_start_matches("switch to the ")
+                        .trim_end_matches(" tab")
                 } else if clean_text.starts_with("switch tab ") {
                     clean_text.trim_start_matches("switch tab ")
                 } else {
                     clean_text.trim_start_matches("select tab ")
-                }.trim();
+                }
+                .trim();
 
                 // Convert word numbers (one, two, 1, 2)
                 let tab_idx = match rest {
@@ -575,23 +646,134 @@ impl Orchestrator {
                 });
             }
 
+            // Browser Click Element ("click the search button", "click the login button", "click Sign In button", "click element search_input")
+            if clean_text.starts_with("click the ")
+                || clean_text.starts_with("click button ")
+                || clean_text.starts_with("click element ")
+                || (clean_text.starts_with("click ") && !clean_text.starts_with("click_window"))
+            {
+                let target = clean_text
+                    .trim_start_matches("click the button that says ")
+                    .trim_start_matches("click the button ")
+                    .trim_start_matches("click button ")
+                    .trim_start_matches("click element ")
+                    .trim_start_matches("click the ")
+                    .trim_start_matches("click ")
+                    .trim();
+
+                if !target.is_empty() {
+                    return Ok(ParsedIntent {
+                        tool_name: "browser_click_element".to_string(),
+                        arguments: json!({ "query": target, "target": target, "browser": "Chrome" }),
+                        raw_command: command.to_string(),
+                    });
+                }
+            }
+
+            // Browser Focus Element ("focus the search box", "focus the username field", "focus search box")
+            if (clean_text.starts_with("focus ") || clean_text.starts_with("focus the "))
+                && !clean_text.starts_with("focus_window ")
+                && !clean_text.starts_with("focus window ")
+            {
+                let target = clean_text
+                    .trim_start_matches("focus the input ")
+                    .trim_start_matches("focus input ")
+                    .trim_start_matches("focus element ")
+                    .trim_start_matches("focus the ")
+                    .trim_start_matches("focus ")
+                    .trim();
+
+                if !target.is_empty() {
+                    return Ok(ParsedIntent {
+                        tool_name: "browser_focus_element".to_string(),
+                        arguments: json!({ "query": target, "target": target, "browser": "Chrome" }),
+                        raw_command: command.to_string(),
+                    });
+                }
+            }
+
+            // Browser Get Element Text ("read text from element", "read the text from the page element", "what does this button say", "get text of element")
+            if clean_text == "what does this button say"
+                || clean_text.starts_with("read text from ")
+                || clean_text.starts_with("read the text from ")
+                || clean_text.starts_with("get text of ")
+                || clean_text.starts_with("get text from ")
+            {
+                let target = if clean_text == "what does this button say" {
+                    "button"
+                } else {
+                    clean_text
+                        .trim_start_matches("read the text from the page element ")
+                        .trim_start_matches("read text from element ")
+                        .trim_start_matches("read text from ")
+                        .trim_start_matches("read the text from ")
+                        .trim_start_matches("get text of element ")
+                        .trim_start_matches("get text of ")
+                        .trim_start_matches("get text from ")
+                        .trim()
+                };
+
+                return Ok(ParsedIntent {
+                    tool_name: "browser_get_element_text".to_string(),
+                    arguments: json!({ "query": target, "target": target, "browser": "Chrome" }),
+                    raw_command: command.to_string(),
+                });
+            }
+
+            // Browser Get Element Attributes ("get attributes of element", "get element attributes", "get properties of")
+            if clean_text.starts_with("get attributes of ")
+                || clean_text.starts_with("get element attributes ")
+                || clean_text.starts_with("get properties of ")
+            {
+                let target = clean_text
+                    .trim_start_matches("get attributes of element ")
+                    .trim_start_matches("get element attributes ")
+                    .trim_start_matches("get attributes of ")
+                    .trim_start_matches("get properties of ")
+                    .trim();
+                return Ok(ParsedIntent {
+                    tool_name: "browser_get_element_attributes".to_string(),
+                    arguments: json!({ "query": target, "target": target, "browser": "Chrome" }),
+                    raw_command: command.to_string(),
+                });
+            }
+
+            // Browser Find Element ("browser_find_element", "find DOM element search box", "find page element login", "find browser element ...")
+            if clean_text.starts_with("browser_find_element")
+                || clean_text.starts_with("find dom element ")
+                || clean_text.starts_with("find page element ")
+                || clean_text.starts_with("find browser element ")
+                || clean_text.starts_with("find in browser ")
+            {
+                let target = clean_text
+                    .trim_start_matches("browser_find_element")
+                    .trim_start_matches("find dom element ")
+                    .trim_start_matches("find page element ")
+                    .trim_start_matches("find browser element ")
+                    .trim_start_matches("find in browser ")
+                    .trim();
+
+                if !target.is_empty() {
+                    return Ok(ParsedIntent {
+                        tool_name: "browser_find_element".to_string(),
+                        arguments: json!({ "query": target, "browser": "Chrome" }),
+                        raw_command: command.to_string(),
+                    });
+                }
+            }
+
             // Browser navigation requests ("go to <URL>", "navigate to <URL>")
             if lower.starts_with("go to ")
                 || lower.starts_with("navigate to ")
                 || lower.starts_with("browser_navigate ")
                 || lower.starts_with("browser navigate ")
             {
-                let raw_url = if let Some(rest) = lower.strip_prefix("go to ") {
-                    rest
-                } else if let Some(rest) = lower.strip_prefix("navigate to ") {
-                    rest
-                } else if let Some(rest) = lower.strip_prefix("browser_navigate ") {
-                    rest
-                } else if let Some(rest) = lower.strip_prefix("browser navigate ") {
-                    rest
-                } else {
-                    ""
-                };
+                let raw_url = lower
+                    .strip_prefix("go to ")
+                    .or_else(|| lower.strip_prefix("navigate to "))
+                    .or_else(|| lower.strip_prefix("browser_navigate "))
+                    .or_else(|| lower.strip_prefix("browser navigate "))
+                    .unwrap_or_default();
 
                 let target_url = raw_url.trim().trim_end_matches(['.', '!', '?']).trim();
 
@@ -701,7 +883,9 @@ impl Orchestrator {
                     || clean_text.contains(" open")))
         {
             let app = if clean_text.starts_with("is_application_running ") {
-                clean_text.trim_start_matches("is_application_running ").trim()
+                clean_text
+                    .trim_start_matches("is_application_running ")
+                    .trim()
             } else if clean_text.starts_with("is ") && clean_text.contains(" running") {
                 let after_is = clean_text.trim_start_matches("is ").trim();
                 after_is.split(" running").next().unwrap_or(after_is).trim()
@@ -760,7 +944,7 @@ impl Orchestrator {
             if clean_text.contains("region") {
                 let numbers: Vec<i64> = clean_text
                     .split_whitespace()
-                    .filter_map(|w| w.parse::<i64>().ok())
+                    .filter_map(|w: &str| w.parse::<i64>().ok())
                     .collect();
                 if numbers.len() >= 4 {
                     return Ok(ParsedIntent {
@@ -812,20 +996,40 @@ impl Orchestrator {
             || clean_text.starts_with("set_clipboard ")
         {
             let mut clip_text = "";
-            let lower = clean_text;
+            let lower = &clean_text;
 
-            if lower.starts_with("copy this to my clipboard:") {
-                clip_text = command.trim_start_matches(|c: char| c != ':').trim_start_matches(':').trim();
-            } else if lower.starts_with("copy this to my clipboard") {
-                clip_text = command.trim_start_matches("copy this to my clipboard").trim();
+            if lower.starts_with("copy this to my clipboard") {
+                clip_text = command
+                    .trim_start_matches("copy this to my clipboard")
+                    .trim()
+                    .trim_start_matches(':')
+                    .trim();
             } else if lower.starts_with("set clipboard to ") {
-                clip_text = command.trim_start_matches("set clipboard to ").trim();
+                clip_text = command
+                    .trim_start_matches("set clipboard to ")
+                    .trim()
+                    .trim_start_matches(':')
+                    .trim();
             } else if lower.starts_with("set clipboard ") {
-                clip_text = command.trim_start_matches("set clipboard ").trim();
+                clip_text = command
+                    .trim_start_matches("set clipboard ")
+                    .trim()
+                    .trim_start_matches(':')
+                    .trim();
             } else if lower.starts_with("set_clipboard ") {
-                clip_text = command.trim_start_matches("set_clipboard ").trim();
-            } else if lower.starts_with("copy ") && (lower.ends_with(" to my clipboard") || lower.ends_with(" to clipboard")) {
-                let start_idx = command.to_lowercase().find("copy ").map(|i| i + 5).unwrap_or(0);
+                clip_text = command
+                    .trim_start_matches("set_clipboard ")
+                    .trim()
+                    .trim_start_matches(':')
+                    .trim();
+            } else if lower.starts_with("copy ")
+                && (lower.ends_with(" to my clipboard") || lower.ends_with(" to clipboard"))
+            {
+                let start_idx = command
+                    .to_lowercase()
+                    .find("copy ")
+                    .map(|i| i + 5)
+                    .unwrap_or(0);
                 let end_idx = if command.to_lowercase().ends_with(" to my clipboard") {
                     command.len() - " to my clipboard".len()
                 } else if command.to_lowercase().ends_with(" to clipboard") {
@@ -834,8 +1038,14 @@ impl Orchestrator {
                     command.len()
                 };
                 clip_text = command[start_idx..end_idx].trim();
-            } else if lower.starts_with("put ") && (lower.ends_with(" in my clipboard") || lower.ends_with(" in clipboard")) {
-                let start_idx = command.to_lowercase().find("put ").map(|i| i + 4).unwrap_or(0);
+            } else if lower.starts_with("put ")
+                && (lower.ends_with(" in my clipboard") || lower.ends_with(" in clipboard"))
+            {
+                let start_idx = command
+                    .to_lowercase()
+                    .find("put ")
+                    .map(|i| i + 4)
+                    .unwrap_or(0);
                 let end_idx = if command.to_lowercase().ends_with(" in my clipboard") {
                     command.len() - " in my clipboard".len()
                 } else if command.to_lowercase().ends_with(" in clipboard") {
@@ -879,29 +1089,59 @@ impl Orchestrator {
             if let Some(titled_idx) = command.to_lowercase().find("titled ") {
                 let after_titled = &command[titled_idx + 7..];
                 if let Some(saying_idx) = after_titled.to_lowercase().find(" saying ") {
-                    title = after_titled[..saying_idx].trim().trim_matches(['"', '\'']).to_string();
-                    message = after_titled[saying_idx + 8..].trim().trim_matches(['"', '\'']).to_string();
+                    title = after_titled[..saying_idx]
+                        .trim()
+                        .trim_matches(['"', '\''])
+                        .to_string();
+                    message = after_titled[saying_idx + 8..]
+                        .trim()
+                        .trim_matches(['"', '\''])
+                        .to_string();
                 } else if let Some(that_idx) = after_titled.to_lowercase().find(" that ") {
-                    title = after_titled[..that_idx].trim().trim_matches(['"', '\'']).to_string();
-                    message = after_titled[that_idx + 6..].trim().trim_matches(['"', '\'']).to_string();
+                    title = after_titled[..that_idx]
+                        .trim()
+                        .trim_matches(['"', '\''])
+                        .to_string();
+                    message = after_titled[that_idx + 6..]
+                        .trim()
+                        .trim_matches(['"', '\''])
+                        .to_string();
                 } else {
                     message = after_titled.trim().trim_matches(['"', '\'']).to_string();
                 }
             } else if let Some(with_title_idx) = command.to_lowercase().find("with title ") {
                 let after_title = &command[with_title_idx + 11..];
                 if let Some(saying_idx) = after_title.to_lowercase().find(" saying ") {
-                    title = after_title[..saying_idx].trim().trim_matches(['"', '\'']).to_string();
-                    message = after_title[saying_idx + 8..].trim().trim_matches(['"', '\'']).to_string();
+                    title = after_title[..saying_idx]
+                        .trim()
+                        .trim_matches(['"', '\''])
+                        .to_string();
+                    message = after_title[saying_idx + 8..]
+                        .trim()
+                        .trim_matches(['"', '\''])
+                        .to_string();
                 } else if let Some(that_idx) = after_title.to_lowercase().find(" that ") {
-                    title = after_title[..that_idx].trim().trim_matches(['"', '\'']).to_string();
-                    message = after_title[that_idx + 6..].trim().trim_matches(['"', '\'']).to_string();
+                    title = after_title[..that_idx]
+                        .trim()
+                        .trim_matches(['"', '\''])
+                        .to_string();
+                    message = after_title[that_idx + 6..]
+                        .trim()
+                        .trim_matches(['"', '\''])
+                        .to_string();
                 } else {
                     message = after_title.trim().trim_matches(['"', '\'']).to_string();
                 }
             } else if let Some(saying_idx) = command.to_lowercase().find(" saying ") {
-                message = command[saying_idx + 8..].trim().trim_matches(['"', '\'']).to_string();
+                message = command[saying_idx + 8..]
+                    .trim()
+                    .trim_matches(['"', '\''])
+                    .to_string();
             } else if let Some(that_idx) = command.to_lowercase().find(" that ") {
-                message = command[that_idx + 6..].trim().trim_matches(['"', '\'']).to_string();
+                message = command[that_idx + 6..]
+                    .trim()
+                    .trim_matches(['"', '\''])
+                    .to_string();
             } else if clean_text == "notify me"
                 || clean_text == "send me a notification"
                 || clean_text == "show a notification"
@@ -1011,10 +1251,14 @@ impl Orchestrator {
                         String::new()
                     };
                     let cleaned = stripped
-                        .trim_end_matches(|c: char| c == '?' || c == '.' || c == '!')
+                        .trim_end_matches(['?', '.', '!'])
                         .trim()
                         .to_string();
-                    if cleaned.is_empty() { None } else { Some(cleaned) }
+                    if cleaned.is_empty() {
+                        None
+                    } else {
+                        Some(cleaned)
+                    }
                 };
 
                 return Ok(ParsedIntent {
@@ -1078,10 +1322,15 @@ impl Orchestrator {
                         String::new()
                     };
                     let cleaned = stripped
-                        .trim_end_matches(|c: char| c == '?' || c == '.' || c == '!')
+                        .trim_end_matches(['?', '.', '!'])
                         .trim()
                         .to_string();
-                    if cleaned.is_empty() || cleaned == "the ui" || cleaned == "ui" || cleaned == "tree" || cleaned == "ui tree" {
+                    if cleaned.is_empty()
+                        || cleaned == "the ui"
+                        || cleaned == "ui"
+                        || cleaned == "tree"
+                        || cleaned == "ui tree"
+                    {
                         None
                     } else {
                         Some(cleaned)
@@ -1184,7 +1433,9 @@ impl Orchestrator {
             || lower_cmd.contains("what does my screen say")
             || lower_cmd.contains("written on my screen")
             || lower_cmd.contains("read everything on the screen")
-            || (lower_cmd.contains("read") && lower_cmd.contains("screen") && !lower_cmd.contains("describe"));
+            || (lower_cmd.contains("read")
+                && lower_cmd.contains("screen")
+                && !lower_cmd.contains("describe"));
 
         if is_ocr {
             return Ok(ParsedIntent {
@@ -1204,7 +1455,10 @@ impl Orchestrator {
         }
 
         // 21. Controlled failure for unknown intent (NO automatic fallthrough to open_application!)
-        Err(anyhow!("Could not determine intent for command: '{}'", command))
+        Err(anyhow!(
+            "Could not determine intent for command: '{}'",
+            command
+        ))
     }
 
     /// Execute a command through the complete architectural pipeline.
@@ -1493,13 +1747,20 @@ impl Orchestrator {
                     .get("count")
                     .and_then(|v| v.as_u64())
                     .unwrap_or(0);
-                format!("Found {} active processes running on the system, sir.", count)
+                format!(
+                    "Found {} active processes running on the system, sir.",
+                    count
+                )
             }
             "take_screenshot" | "take_screenshot_display" | "take_screenshot_region" => {
                 "Screenshot captured, sir.".to_string()
             }
             "get_clipboard" => {
-                let text = result.data.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                let text = result
+                    .data
+                    .get("text")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
                 if text.is_empty() {
                     "Your clipboard is currently empty, sir.".to_string()
                 } else {
@@ -1507,16 +1768,18 @@ impl Orchestrator {
                 }
             }
             "set_clipboard" => {
-                let text = intent.arguments.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                let text = intent
+                    .arguments
+                    .get("text")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
                 if text.is_empty() {
                     "Copied text to your clipboard, sir.".to_string()
                 } else {
                     format!("Copied {} to your clipboard, sir.", text)
                 }
             }
-            "show_notification" => {
-                "Notification displayed, sir.".to_string()
-            }
+            "show_notification" => "Notification displayed, sir.".to_string(),
             "describe_screen" => {
                 let desc = result
                     .data
@@ -1569,8 +1832,11 @@ impl Orchestrator {
                         .unwrap_or_default();
 
                     if labels.is_empty() {
-                        format!("I detected {} UI element{} on the current screen.", element_count,
-                            if element_count == 1 { "" } else { "s" })
+                        format!(
+                            "I detected {} UI element{} on the current screen.",
+                            element_count,
+                            if element_count == 1 { "" } else { "s" }
+                        )
                     } else {
                         format!(
                             "I detected {} UI element{} on the screen: {}.",
@@ -1596,7 +1862,10 @@ impl Orchestrator {
                     .unwrap_or(0);
 
                 if element_count == 0 {
-                    format!("I inspected the UI tree of '{}' but found no matching elements, sir.", win_title)
+                    format!(
+                        "I inspected the UI tree of '{}' but found no matching elements, sir.",
+                        win_title
+                    )
                 } else {
                     let labels: Vec<String> = result
                         .data
@@ -1604,13 +1873,16 @@ impl Orchestrator {
                         .and_then(|v| v.as_array())
                         .map(|arr| {
                             arr.iter()
-                                .filter_map(|e| {
+                                .map(|e| {
                                     let name = e.get("name").and_then(|n| n.as_str()).unwrap_or("");
-                                    let ctype = e.get("control_type").and_then(|t| t.as_str()).unwrap_or("Element");
+                                    let ctype = e
+                                        .get("control_type")
+                                        .and_then(|t| t.as_str())
+                                        .unwrap_or("Element");
                                     if !name.is_empty() {
-                                        Some(format!("{} ({})", name, ctype))
+                                        format!("{} ({})", name, ctype)
                                     } else {
-                                        Some(ctype.to_string())
+                                        ctype.to_string()
                                     }
                                 })
                                 .take(5)
@@ -1633,13 +1905,24 @@ impl Orchestrator {
                 }
             }
             "browser_status" => {
-                let browser = result.data.get("browser").and_then(|v| v.as_str()).unwrap_or("Chrome");
-                let running = result.data.get("running").and_then(|v| v.as_bool()).unwrap_or(false);
+                let browser = result
+                    .data
+                    .get("browser")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Chrome");
+                let running = result
+                    .data
+                    .get("running")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
                 let title = result.data.get("window_title").and_then(|v| v.as_str());
 
                 if running {
                     if let Some(t) = title {
-                        format!("{} is currently running with active window '{}', sir.", browser, t)
+                        format!(
+                            "{} is currently running with active window '{}', sir.",
+                            browser, t
+                        )
                     } else {
                         format!("Yes, {} is currently running, sir.", browser)
                     }
@@ -1648,8 +1931,16 @@ impl Orchestrator {
                 }
             }
             "open_browser" => {
-                let browser = result.data.get("browser").and_then(|v| v.as_str()).unwrap_or("Chrome");
-                let running = result.data.get("running").and_then(|v| v.as_bool()).unwrap_or(false);
+                let browser = result
+                    .data
+                    .get("browser")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Chrome");
+                let running = result
+                    .data
+                    .get("running")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
 
                 if running {
                     format!("{} is now open and active, sir.", browser)
@@ -1658,7 +1949,11 @@ impl Orchestrator {
                 }
             }
             "browser_navigate" => {
-                let url = result.data.get("url").and_then(|v| v.as_str()).unwrap_or("the requested URL");
+                let url = result
+                    .data
+                    .get("url")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("the requested URL");
                 format!("Navigated to {}, sir.", url)
             }
             "browser_back" => "Going back, sir.".to_string(),
@@ -1666,7 +1961,10 @@ impl Orchestrator {
             "browser_reload" => "I've refreshed the page, sir.".to_string(),
             "browser_current_page" => {
                 let url = result.data.get("current_url").and_then(|v| v.as_str());
-                let title = result.data.get("current_page_title").and_then(|v| v.as_str());
+                let title = result
+                    .data
+                    .get("current_page_title")
+                    .and_then(|v| v.as_str());
                 match (title, url) {
                     (Some(t), Some(u)) => format!("You are currently on '{}' at {}, sir.", t, u),
                     (Some(t), None) => format!("You are currently on page '{}', sir.", t),
@@ -1675,7 +1973,11 @@ impl Orchestrator {
                 }
             }
             "browser_list_tabs" => {
-                let count = result.data.get("tab_count").and_then(|v| v.as_u64()).unwrap_or(0);
+                let count = result
+                    .data
+                    .get("tab_count")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
                 if count == 0 {
                     "No open browser tabs were found, sir.".to_string()
                 } else if count == 1 {
@@ -1687,7 +1989,10 @@ impl Orchestrator {
             "browser_new_tab" => "Opened a new tab, sir.".to_string(),
             "browser_switch_tab" => {
                 if let Some(tab_obj) = result.data.get("tab") {
-                    let title = tab_obj.get("title").and_then(|v| v.as_str()).unwrap_or("tab");
+                    let title = tab_obj
+                        .get("title")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("tab");
                     let id = tab_obj.get("tab_id").and_then(|v| v.as_u64()).unwrap_or(1);
                     format!("Switched to tab {}, '{}', sir.", id, title)
                 } else {
@@ -1695,6 +2000,43 @@ impl Orchestrator {
                 }
             }
             "browser_close_tab" => "Closed the tab, sir.".to_string(),
+            "browser_find_element" => {
+                let ambiguous = result
+                    .data
+                    .get("ambiguous")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let match_count = result
+                    .data
+                    .get("match_count")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                if ambiguous {
+                    format!(
+                        "Found {} matching elements, sir. Please specify which one to select.",
+                        match_count
+                    )
+                } else if match_count == 0 {
+                    "No matching page element was found, sir.".to_string()
+                } else {
+                    "Found 1 matching element on the page, sir.".to_string()
+                }
+            }
+            "browser_click_element" => "Clicked the element, sir.".to_string(),
+            "browser_focus_element" => "Focused the element, sir.".to_string(),
+            "browser_get_element_text" => {
+                let text = result
+                    .data
+                    .get("text")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                if !text.is_empty() {
+                    format!("The element text is: '{}', sir.", text)
+                } else {
+                    "The element has no text content, sir.".to_string()
+                }
+            }
+            "browser_get_element_attributes" => "Retrieved element attributes, sir.".to_string(),
             "read_screen" => {
                 let has_text = result
                     .data
@@ -1968,7 +2310,9 @@ mod tests {
         assert_eq!(intent.tool_name, "move_window");
         assert_eq!(intent.arguments["x"], 100);
 
-        let intent = orchestrator.parse_intent("resize chrome to 1280 by 720").unwrap();
+        let intent = orchestrator
+            .parse_intent("resize chrome to 1280 by 720")
+            .unwrap();
         assert_eq!(intent.tool_name, "resize_window");
         assert_eq!(intent.arguments["width"], 1280);
 
@@ -2098,7 +2442,10 @@ mod tests {
 
         // close chrome -> RiskLevel::Medium -> Allowed under Level3Conservative
         let outcome = orchestrator.execute_command("close chrome").await;
-        if let ExecutionOutcome::Success { spoken_response, .. } = outcome {
+        if let ExecutionOutcome::Success {
+            spoken_response, ..
+        } = outcome
+        {
             assert_eq!(spoken_response, "Chrome has been closed, sir.");
         } else {
             panic!("Expected Success outcome");
@@ -2106,7 +2453,10 @@ mod tests {
 
         // list processes -> RiskLevel::Low -> Allowed
         let outcome = orchestrator.execute_command("list processes?").await;
-        if let ExecutionOutcome::Success { spoken_response, .. } = outcome {
+        if let ExecutionOutcome::Success {
+            spoken_response, ..
+        } = outcome
+        {
             assert!(spoken_response.contains("active processes"));
         } else {
             panic!("Expected Success outcome");
@@ -2114,7 +2464,10 @@ mod tests {
 
         // is notepad running? -> RiskLevel::Low -> Allowed
         let outcome = orchestrator.execute_command("is notepad running?").await;
-        if let ExecutionOutcome::Success { spoken_response, .. } = outcome {
+        if let ExecutionOutcome::Success {
+            spoken_response, ..
+        } = outcome
+        {
             assert!(spoken_response.contains("Notepad"));
         } else {
             panic!("Expected Success outcome");
@@ -2132,11 +2485,15 @@ mod tests {
         let intent = orchestrator.parse_intent("screenshot my screen").unwrap();
         assert_eq!(intent.tool_name, "take_screenshot");
 
-        let intent = orchestrator.parse_intent("take a screenshot of display 2").unwrap();
+        let intent = orchestrator
+            .parse_intent("take a screenshot of display 2")
+            .unwrap();
         assert_eq!(intent.tool_name, "take_screenshot_display");
         assert_eq!(intent.arguments["display_index"], 2);
 
-        let intent = orchestrator.parse_intent("take a screenshot of region 0 0 800 600").unwrap();
+        let intent = orchestrator
+            .parse_intent("take a screenshot of region 0 0 800 600")
+            .unwrap();
         assert_eq!(intent.tool_name, "take_screenshot_region");
         assert_eq!(intent.arguments["width"], 800);
         assert_eq!(intent.arguments["height"], 600);
@@ -2148,7 +2505,12 @@ mod tests {
         let orchestrator = Orchestrator::new(adapter);
 
         let outcome = orchestrator.execute_command("take a screenshot").await;
-        if let ExecutionOutcome::Success { spoken_response, tool_data, .. } = outcome {
+        if let ExecutionOutcome::Success {
+            spoken_response,
+            tool_data,
+            ..
+        } = outcome
+        {
             assert_eq!(spoken_response, "Screenshot captured, sir.");
             assert_eq!(tool_data["format"], "png");
         } else {
@@ -2161,7 +2523,9 @@ mod tests {
         let adapter = Arc::new(MockAdapter::new(false));
         let orchestrator = Orchestrator::new(adapter);
 
-        let intent = orchestrator.parse_intent("what is in my clipboard?").unwrap();
+        let intent = orchestrator
+            .parse_intent("what is in my clipboard?")
+            .unwrap();
         assert_eq!(intent.tool_name, "get_clipboard");
 
         let intent = orchestrator.parse_intent("what's in my clipboard").unwrap();
@@ -2170,19 +2534,27 @@ mod tests {
         let intent = orchestrator.parse_intent("read my clipboard").unwrap();
         assert_eq!(intent.tool_name, "get_clipboard");
 
-        let intent = orchestrator.parse_intent("copy hello world to my clipboard").unwrap();
+        let intent = orchestrator
+            .parse_intent("copy hello world to my clipboard")
+            .unwrap();
         assert_eq!(intent.tool_name, "set_clipboard");
         assert_eq!(intent.arguments["text"], "hello world");
 
-        let intent = orchestrator.parse_intent("copy this to my clipboard: hello world").unwrap();
+        let intent = orchestrator
+            .parse_intent("copy this to my clipboard: hello world")
+            .unwrap();
         assert_eq!(intent.tool_name, "set_clipboard");
         assert_eq!(intent.arguments["text"], "hello world");
 
-        let intent = orchestrator.parse_intent("put hello world in my clipboard").unwrap();
+        let intent = orchestrator
+            .parse_intent("put hello world in my clipboard")
+            .unwrap();
         assert_eq!(intent.tool_name, "set_clipboard");
         assert_eq!(intent.arguments["text"], "hello world");
 
-        let intent = orchestrator.parse_intent("set clipboard to hello world").unwrap();
+        let intent = orchestrator
+            .parse_intent("set clipboard to hello world")
+            .unwrap();
         assert_eq!(intent.tool_name, "set_clipboard");
         assert_eq!(intent.arguments["text"], "hello world");
     }
@@ -2192,15 +2564,25 @@ mod tests {
         let adapter = Arc::new(MockAdapter::new(false));
         let orchestrator = Orchestrator::new(adapter);
 
-        let outcome = orchestrator.execute_command("copy hello world to my clipboard").await;
-        if let ExecutionOutcome::Success { spoken_response, .. } = outcome {
+        let outcome = orchestrator
+            .execute_command("copy hello world to my clipboard")
+            .await;
+        if let ExecutionOutcome::Success {
+            spoken_response, ..
+        } = outcome
+        {
             assert!(spoken_response.contains("Copied hello world"));
         } else {
             panic!("Expected Success outcome");
         }
 
-        let outcome = orchestrator.execute_command("what is in my clipboard").await;
-        if let ExecutionOutcome::Success { spoken_response, .. } = outcome {
+        let outcome = orchestrator
+            .execute_command("what is in my clipboard")
+            .await;
+        if let ExecutionOutcome::Success {
+            spoken_response, ..
+        } = outcome
+        {
             assert!(spoken_response.contains("hello world"));
         } else {
             panic!("Expected Success outcome");
@@ -2212,22 +2594,30 @@ mod tests {
         let adapter = Arc::new(MockAdapter::new(false));
         let orchestrator = Orchestrator::new(adapter);
 
-        let intent = orchestrator.parse_intent("send me a notification saying hello").unwrap();
+        let intent = orchestrator
+            .parse_intent("send me a notification saying hello")
+            .unwrap();
         assert_eq!(intent.tool_name, "show_notification");
         assert_eq!(intent.arguments["title"], "JARVIS");
         assert_eq!(intent.arguments["message"], "hello");
 
-        let intent = orchestrator.parse_intent("show a notification titled JARVIS saying hello").unwrap();
+        let intent = orchestrator
+            .parse_intent("show a notification titled JARVIS saying hello")
+            .unwrap();
         assert_eq!(intent.tool_name, "show_notification");
         assert_eq!(intent.arguments["title"], "JARVIS");
         assert_eq!(intent.arguments["message"], "hello");
 
-        let intent = orchestrator.parse_intent("show a notification titled Build saying complete").unwrap();
+        let intent = orchestrator
+            .parse_intent("show a notification titled Build saying complete")
+            .unwrap();
         assert_eq!(intent.tool_name, "show_notification");
         assert_eq!(intent.arguments["title"], "Build");
         assert_eq!(intent.arguments["message"], "complete");
 
-        let intent = orchestrator.parse_intent("notify me that the task is complete").unwrap();
+        let intent = orchestrator
+            .parse_intent("notify me that the task is complete")
+            .unwrap();
         assert_eq!(intent.tool_name, "show_notification");
         assert_eq!(intent.arguments["message"], "the task is complete");
     }
@@ -2237,8 +2627,15 @@ mod tests {
         let adapter = Arc::new(MockAdapter::new(false));
         let orchestrator = Orchestrator::new(adapter);
 
-        let outcome = orchestrator.execute_command("send me a notification saying hello").await;
-        if let ExecutionOutcome::Success { spoken_response, tool_data, .. } = outcome {
+        let outcome = orchestrator
+            .execute_command("send me a notification saying hello")
+            .await;
+        if let ExecutionOutcome::Success {
+            spoken_response,
+            tool_data,
+            ..
+        } = outcome
+        {
             assert_eq!(spoken_response, "Notification displayed, sir.");
             assert_eq!(tool_data["title"], "JARVIS");
         } else {
@@ -2266,9 +2663,14 @@ mod tests {
             assert_eq!(intent.tool_name, "describe_screen");
         }
 
-        let custom_intent = orchestrator.parse_intent("what application is visible on my screen?").unwrap();
+        let custom_intent = orchestrator
+            .parse_intent("what application is visible on my screen?")
+            .unwrap();
         assert_eq!(custom_intent.tool_name, "describe_screen");
-        assert!(custom_intent.arguments["prompt"].as_str().unwrap().contains("application"));
+        assert!(custom_intent.arguments["prompt"]
+            .as_str()
+            .unwrap()
+            .contains("application"));
     }
 
     #[test]
@@ -2311,23 +2713,31 @@ mod tests {
         let orchestrator = Orchestrator::new(adapter);
 
         // Visual requests -> describe_screen
-        let visual_cmd = orchestrator.parse_intent("what do you see on my screen").unwrap();
+        let visual_cmd = orchestrator
+            .parse_intent("what do you see on my screen")
+            .unwrap();
         assert_eq!(visual_cmd.tool_name, "describe_screen");
 
         let visual_cmd2 = orchestrator.parse_intent("describe my screen").unwrap();
         assert_eq!(visual_cmd2.tool_name, "describe_screen");
 
         // Text requests -> read_screen (canonical)
-        let ocr_cmd = orchestrator.parse_intent("what text is visible on my screen").unwrap();
+        let ocr_cmd = orchestrator
+            .parse_intent("what text is visible on my screen")
+            .unwrap();
         assert_eq!(ocr_cmd.tool_name, "read_screen");
 
         let ocr_cmd2 = orchestrator.parse_intent("read my screen").unwrap();
         assert_eq!(ocr_cmd2.tool_name, "read_screen");
 
-        let ocr_cmd3 = orchestrator.parse_intent("what does my screen say").unwrap();
+        let ocr_cmd3 = orchestrator
+            .parse_intent("what does my screen say")
+            .unwrap();
         assert_eq!(ocr_cmd3.tool_name, "read_screen");
 
-        let ocr_cmd4 = orchestrator.parse_intent("read everything on the screen").unwrap();
+        let ocr_cmd4 = orchestrator
+            .parse_intent("read everything on the screen")
+            .unwrap();
         assert_eq!(ocr_cmd4.tool_name, "read_screen");
     }
 
@@ -2356,7 +2766,8 @@ mod tests {
             let intent = orchestrator.parse_intent(cmd).unwrap();
             assert_eq!(
                 intent.tool_name, "detect_screen_elements",
-                "Expected detect_screen_elements for: {:?}", cmd
+                "Expected detect_screen_elements for: {:?}",
+                cmd
             );
         }
     }
@@ -2377,13 +2788,18 @@ mod tests {
         let intent = orchestrator.parse_intent("where is Chrome").unwrap();
         assert_eq!(intent.tool_name, "detect_screen_elements");
         // query should contain "chrome"
-        assert!(intent.arguments["query"].as_str().unwrap_or("").contains("chrome"));
+        assert!(intent.arguments["query"]
+            .as_str()
+            .unwrap_or("")
+            .contains("chrome"));
 
         let intent = orchestrator.parse_intent("where is the taskbar").unwrap();
         assert_eq!(intent.tool_name, "detect_screen_elements");
         assert_eq!(intent.arguments["query"].as_str(), Some("taskbar"));
 
-        let intent = orchestrator.parse_intent("locate the close button").unwrap();
+        let intent = orchestrator
+            .parse_intent("locate the close button")
+            .unwrap();
         assert_eq!(intent.tool_name, "detect_screen_elements");
         assert_eq!(intent.arguments["query"].as_str(), Some("close button"));
     }
@@ -2394,7 +2810,9 @@ mod tests {
         let orchestrator = Orchestrator::new(adapter);
 
         // Generic element queries have no specific query argument
-        let intent = orchestrator.parse_intent("what buttons are on my screen").unwrap();
+        let intent = orchestrator
+            .parse_intent("what buttons are on my screen")
+            .unwrap();
         assert_eq!(intent.tool_name, "detect_screen_elements");
 
         let intent = orchestrator.parse_intent("what can i click").unwrap();
@@ -2410,24 +2828,32 @@ mod tests {
         let v = orchestrator.parse_intent("describe my screen").unwrap();
         assert_eq!(v.tool_name, "describe_screen");
 
-        let v2 = orchestrator.parse_intent("what do you see on my screen").unwrap();
+        let v2 = orchestrator
+            .parse_intent("what do you see on my screen")
+            .unwrap();
         assert_eq!(v2.tool_name, "describe_screen");
 
         // 2. Text extraction -> read_screen
         let r = orchestrator.parse_intent("read my screen").unwrap();
         assert_eq!(r.tool_name, "read_screen");
 
-        let r2 = orchestrator.parse_intent("what text is on my screen").unwrap();
+        let r2 = orchestrator
+            .parse_intent("what text is on my screen")
+            .unwrap();
         assert_eq!(r2.tool_name, "read_screen");
 
         // 3. Element detection -> detect_screen_elements
         let d = orchestrator.parse_intent("find the Chrome icon").unwrap();
         assert_eq!(d.tool_name, "detect_screen_elements");
 
-        let d2 = orchestrator.parse_intent("what buttons are on my screen").unwrap();
+        let d2 = orchestrator
+            .parse_intent("what buttons are on my screen")
+            .unwrap();
         assert_eq!(d2.tool_name, "detect_screen_elements");
 
-        let d3 = orchestrator.parse_intent("where is the search box").unwrap();
+        let d3 = orchestrator
+            .parse_intent("where is the search box")
+            .unwrap();
         assert_eq!(d3.tool_name, "detect_screen_elements");
     }
 
@@ -2449,7 +2875,8 @@ mod tests {
             let intent = orchestrator.parse_intent(cmd).unwrap();
             assert_eq!(
                 intent.tool_name, "inspect_ui_tree",
-                "Expected inspect_ui_tree for: {:?}", cmd
+                "Expected inspect_ui_tree for: {:?}",
+                cmd
             );
         }
     }
@@ -2459,15 +2886,22 @@ mod tests {
         let adapter = Arc::new(MockAdapter::new(false));
         let orchestrator = Orchestrator::new(adapter);
 
-        let intent = orchestrator.parse_intent("find the Soft Reset button").unwrap();
+        let intent = orchestrator
+            .parse_intent("find the Soft Reset button")
+            .unwrap();
         assert_eq!(intent.tool_name, "inspect_ui_tree");
-        assert_eq!(intent.arguments["query"].as_str(), Some("soft reset button"));
+        assert_eq!(
+            intent.arguments["query"].as_str(),
+            Some("soft reset button")
+        );
 
         let intent = orchestrator.parse_intent("inspect search box").unwrap();
         assert_eq!(intent.tool_name, "inspect_ui_tree");
         assert_eq!(intent.arguments["query"].as_str(), Some("search box"));
 
-        let intent = orchestrator.parse_intent("inspect the UI for buttons").unwrap();
+        let intent = orchestrator
+            .parse_intent("inspect the UI for buttons")
+            .unwrap();
         assert_eq!(intent.tool_name, "inspect_ui_tree");
         assert_eq!(intent.arguments["query"].as_str(), Some("buttons"));
     }
@@ -2502,11 +2936,18 @@ mod tests {
         let open_cmd2 = orchestrator.parse_intent("launch chrome").unwrap();
         assert_eq!(open_cmd2.tool_name, "open_browser");
 
-        let nav_cmd = orchestrator.parse_intent("go to https://www.google.com").unwrap();
+        let nav_cmd = orchestrator
+            .parse_intent("go to https://www.google.com")
+            .unwrap();
         assert_eq!(nav_cmd.tool_name, "browser_navigate");
-        assert_eq!(nav_cmd.arguments["url"].as_str(), Some("https://www.google.com"));
+        assert_eq!(
+            nav_cmd.arguments["url"].as_str(),
+            Some("https://www.google.com")
+        );
 
-        let nav_cmd2 = orchestrator.parse_intent("navigate to linkedin.com").unwrap();
+        let nav_cmd2 = orchestrator
+            .parse_intent("navigate to linkedin.com")
+            .unwrap();
         assert_eq!(nav_cmd2.tool_name, "browser_navigate");
         assert_eq!(nav_cmd2.arguments["url"].as_str(), Some("linkedin.com"));
 
@@ -2534,6 +2975,119 @@ mod tests {
 
         let close_tab_cmd = orchestrator.parse_intent("close this tab").unwrap();
         assert_eq!(close_tab_cmd.tool_name, "browser_close_tab");
+
+        let find_cmd = orchestrator
+            .parse_intent("find page element search box")
+            .unwrap();
+        assert_eq!(find_cmd.tool_name, "browser_find_element");
+        assert_eq!(find_cmd.arguments["query"].as_str(), Some("search box"));
+
+        let click_cmd = orchestrator.parse_intent("click the login button").unwrap();
+        assert_eq!(click_cmd.tool_name, "browser_click_element");
+        assert_eq!(click_cmd.arguments["target"].as_str(), Some("login button"));
+
+        let focus_cmd = orchestrator
+            .parse_intent("focus the username field")
+            .unwrap();
+        assert_eq!(focus_cmd.tool_name, "browser_focus_element");
+        assert_eq!(
+            focus_cmd.arguments["target"].as_str(),
+            Some("username field")
+        );
+
+        let text_cmd = orchestrator
+            .parse_intent("read text from element Submit")
+            .unwrap();
+        assert_eq!(text_cmd.tool_name, "browser_get_element_text");
+        assert_eq!(text_cmd.arguments["target"].as_str(), Some("submit"));
+
+        let attr_cmd = orchestrator
+            .parse_intent("get attributes of element Submit")
+            .unwrap();
+        assert_eq!(attr_cmd.tool_name, "browser_get_element_attributes");
+        assert_eq!(attr_cmd.arguments["target"].as_str(), Some("submit"));
+    }
+
+    #[test]
+    fn test_stt_punctuation_intent_variations() {
+        let adapter = Arc::new(MockAdapter::new(false));
+        let orchestrator = Orchestrator::new(adapter);
+
+        // STT Command 1: "Find DOM element Submit"
+        let cmd1 = orchestrator
+            .parse_intent("Find DOM element Submit")
+            .unwrap();
+        assert_eq!(cmd1.tool_name, "browser_find_element");
+        assert_eq!(cmd1.arguments["query"].as_str(), Some("submit"));
+
+        // STT Command 2: "Find DOM element, Submit"
+        let cmd2 = orchestrator
+            .parse_intent("Find DOM element, Submit")
+            .unwrap();
+        assert_eq!(cmd2.tool_name, "browser_find_element");
+        assert_eq!(cmd2.arguments["query"].as_str(), Some("submit"));
+
+        // STT Command 3: "Find Dom element, submit." (Original STT reported failure)
+        let cmd3 = orchestrator
+            .parse_intent("Find Dom element, submit.")
+            .unwrap();
+        assert_eq!(cmd3.tool_name, "browser_find_element");
+        assert_eq!(cmd3.arguments["query"].as_str(), Some("submit"));
+
+        // STT Command 4: "Find DOM element Submit."
+        let cmd4 = orchestrator
+            .parse_intent("Find DOM element Submit.")
+            .unwrap();
+        assert_eq!(cmd4.tool_name, "browser_find_element");
+        assert_eq!(cmd4.arguments["query"].as_str(), Some("submit"));
+
+        // STT Command 5: "Find DOM element: Submit!"
+        let cmd5 = orchestrator
+            .parse_intent("Find DOM element: Submit!")
+            .unwrap();
+        assert_eq!(cmd5.tool_name, "browser_find_element");
+        assert_eq!(cmd5.arguments["query"].as_str(), Some("submit"));
+
+        // STT Command 6: "click Submit."
+        let cmd6 = orchestrator.parse_intent("click Submit.").unwrap();
+        assert_eq!(cmd6.tool_name, "browser_click_element");
+        assert_eq!(cmd6.arguments["target"].as_str(), Some("submit"));
+
+        // STT Command 7: "focus Name input."
+        let cmd7 = orchestrator.parse_intent("focus Name input.").unwrap();
+        assert_eq!(cmd7.tool_name, "browser_focus_element");
+        assert_eq!(cmd7.arguments["target"].as_str(), Some("name input"));
+
+        // STT Command 8: "read text from element, JARVIS DOM TEST."
+        let cmd8 = orchestrator
+            .parse_intent("read text from element, JARVIS DOM TEST.")
+            .unwrap();
+        assert_eq!(cmd8.tool_name, "browser_get_element_text");
+        assert_eq!(cmd8.arguments["target"].as_str(), Some("jarvis dom test"));
+
+        // STT Command 9: "get attributes of element, Submit."
+        let cmd9 = orchestrator
+            .parse_intent("get attributes of element, Submit.")
+            .unwrap();
+        assert_eq!(cmd9.tool_name, "browser_get_element_attributes");
+        assert_eq!(cmd9.arguments["target"].as_str(), Some("submit"));
+
+        // URL preservation test: "go to https://example.com/path?a=1&b=2."
+        let cmd10 = orchestrator
+            .parse_intent("go to https://example.com/path?a=1&b=2.")
+            .unwrap();
+        assert_eq!(cmd10.tool_name, "browser_navigate");
+        assert_eq!(
+            cmd10.arguments["url"].as_str(),
+            Some("https://example.com/path?a=1&b=2")
+        );
+
+        // CSS Selector test: "find DOM element #name-input."
+        let cmd11 = orchestrator
+            .parse_intent("find DOM element #name-input.")
+            .unwrap();
+        assert_eq!(cmd11.tool_name, "browser_find_element");
+        assert_eq!(cmd11.arguments["query"].as_str(), Some("#name-input"));
     }
 
     #[tokio::test]
@@ -2549,5 +3103,3 @@ mod tests {
         }
     }
 }
-
-
