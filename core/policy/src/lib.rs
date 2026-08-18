@@ -103,6 +103,9 @@ impl PolicyEngine {
         // Default classification
         overrides.insert("open_application".to_string(), RiskLevel::Low);
         overrides.insert("take_screenshot".to_string(), RiskLevel::Low);
+        overrides.insert("get_clipboard".to_string(), RiskLevel::Low);
+        overrides.insert("set_clipboard".to_string(), RiskLevel::Low);
+        overrides.insert("show_notification".to_string(), RiskLevel::Low);
         overrides.insert("get_time".to_string(), RiskLevel::Low);
         overrides.insert("get_system_info".to_string(), RiskLevel::Low);
         overrides.insert("close_application".to_string(), RiskLevel::Medium);

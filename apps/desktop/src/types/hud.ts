@@ -19,6 +19,11 @@ export interface ExecutionTelemetry {
   processId?: number;
   durationMs?: number;
   statusMessage?: string;
+  artifactType?: string;
+  path?: string;
+  filename?: string;
+  width?: number;
+  height?: number;
 }
 
 export interface HudEvent {

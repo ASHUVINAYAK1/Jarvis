@@ -506,6 +506,8 @@ impl PlatformAdapter for LinuxPlatformAdapter {
                         visible: true,
                         focused: false,
                         bounds: None,
+                        is_minimized: false,
+                        is_maximized: false,
                     });
                 }
                 Ok(windows)

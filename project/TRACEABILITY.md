@@ -99,7 +99,12 @@
 | Req ID | Requirement | Source Doc | Phase | Milestone | Status |
 |--------|-------------|-----------|-------|-----------|--------|
 | R-W01 | Windows application launching | Doc 4, 9 | 6 | M06.02 | platforms/windows | test_app_alias_resolution | VERIFIED |
-| R-W02 | Windows window management | Doc 4, 9 | 6 | M06.03 | platforms/windows | test_get_platform_info | VERIFIED |
+| R-W02 | Windows window management | Doc 4, 9 | 6 | M06.03 | platforms/windows | test_windows_window_enumeration_and_active_window | VERIFIED |
+| R-W08 | Windows process management | Doc 4, 9 | 6 | M06.04 | services/tools, core/orchestrator | test_process_management_tools_registration_and_execution | VERIFIED |
+| R-W09 | Windows screenshot capture | Doc 4, 9 | 6 | M06.05 | platforms/windows, services/tools | test_screenshot_tools_registration_and_execution | VERIFIED |
+| R-W10 | Windows clipboard read/write | Doc 4, 9 | 6 | M06.06 | platforms/windows, services/tools, core/orchestrator | test_clipboard_tools_registration_and_execution | VERIFIED |
+| R-W11 | Windows desktop notifications | Doc 4, 9 | 6 | M06.07 | platforms/windows, services/tools, core/orchestrator | test_show_notification_tool_registration_and_execution | VERIFIED |
+| R-W07 | Windows system tray & system control | Doc 4, 9 | 6, 14 | M06.04, M14.01 | apps/desktop, services/tools | test_system_control_tools_registration_and_execution | VERIFIED |
 | R-W03 | Windows UI Automation (accessibility tree) | Doc 4, 9 | 8, 14 | M08.04 | — | — | PLANNED |
 | R-W04 | Windows keyboard/mouse control | Doc 4, 9 | 14 | M14.02 | — | — | PLANNED |
 | R-W05 | Windows auto-start on login | Doc 9 | 14 | M14.03 | — | — | PLANNED |

@@ -127,9 +127,14 @@ export const Hud: React.FC = () => {
         setTelemetry({
           taskId: data.task_id,
           toolName: data.tool_name,
-          applicationName: data.tool_data?.application,
+          applicationName: data.tool_data?.application || data.tool_data?.target,
           processId: data.tool_data?.pid,
           durationMs: data.duration_ms,
+          artifactType: data.tool_data?.artifact_type,
+          path: data.tool_data?.path,
+          filename: data.tool_data?.filename,
+          width: data.tool_data?.width,
+          height: data.tool_data?.height,
         });
         setState("SPEAKING");
         setResponse(data.spoken_response);

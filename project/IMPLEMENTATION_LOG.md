@@ -48,6 +48,208 @@
 
 - Physical microphone capture (`cpal`), wake word ("Jarvis"), Webview2 STT, and Windows application launch verified.
 
+## Session 008 — 2026-08-18 (Phase 06 Windows Window Management & Focus)
+
+**Phase:** 06 (Desktop Platform Foundation)  
+**Milestone:** M06.03 (Desktop Window Management & Active Window Focus)  
+**Task:** T06.03.001  
+**Status:** COMPLETE & VERIFIED ✅
+
+1. **Native Win32 Window Management**:
+   - Implemented `EnumWindows`, `GetForegroundWindow`, `SetForegroundWindow`, `ShowWindow`, `SetWindowPos` FFI in `platforms/windows/src/lib.rs`.
+   - Updated `WindowInfo` struct in `crates/platform/src/lib.rs` with `is_minimized` and `is_maximized` fields.
+2. **Window Resolution & Safe Identifiers**:
+   - Added `resolve_window_info` supporting direct HWND hex handles (`0x10204`), decimal HWND strings, executable names (`chrome`, `spotify`), and window titles.
+3. **Window Operations**:
+   - `list_windows()`: Enumerate all visible top-level windows with title, bounds, process name, PID, focus, minimized, maximized states.
+   - `get_active_window()`: Identifies the active foreground window.
+   - `focus_window()`: Restores if minimized and brings window to foreground.
+   - `minimize_window()`, `maximize_window()`, `restore_window()`: Native state manipulation via `ShowWindow`.
+   - `set_window_bounds()`: Multi-monitor and DPI-safe bounds positioning/resizing via `SetWindowPos`.
+4. **Tool Layer Integration**:
+   - Registered 7 built-in tools (`list_windows`, `get_active_window`, `focus_window`, `minimize_window`, `maximize_window`, `restore_window`, `set_window_bounds`) in `services/tools/src/lib.rs`.
+   - Added deterministic intent parsing rules in `core/orchestrator/src/lib.rs`.
+5. **Testing & Verification**:
+   - 71 / 71 workspace unit tests passing.
+   - Clippy: 0 errors.
+   - TypeScript: 0 errors.
+   - Speech subsystem frozen and untouched.
+
+## Session 009 — 2026-08-18 (Phase 06 Window Management Tool Routing & Command Pipeline Integration)
+
+**Phase:** 06 (Desktop Platform Foundation)  
+**Milestone:** M06.03 (Desktop Window Management & Active Window Focus)  
+**Task:** Window Management Tool Routing & Command Integration  
+**Status:** COMPLETE & VERIFIED ✅
+
+1. **Root Cause Analysis of `list_windows.exe` Bug**:
+   - `parse_intent` checked `text.contains("list windows")` with a space. Command `"list_windows"` had an underscore and no space, causing it to bypass window intent rules and hit single-word fallback `!text.contains(' ') && !text.is_empty()`.
+   - Fallback routed `"list_windows"` to `OpenApplicationTool("list_windows")`, which invoked `start list_windows.exe`, producing `"Windows cannot find 'list_windows.exe'"`.
+
+2. **Command Pipeline & Tool Routing Fix**:
+   - Updated `parse_intent` in [`core/orchestrator/src/lib.rs`](file:///c:/Users/Admin/Desktop/my-projects/jarvis/core/orchestrator/src/lib.rs) to recognize explicit tool names (`list_windows`, `get_active_window`, `focus_window`, `minimize_window`, `maximize_window`, `restore_window`, `move_window`, `resize_window`) and natural language variants (`show open windows`, `what window is active`, `bring chrome to front`, `switch to spotify`).
+   - Removed single-word fallback to `open_application`. Unrecognized inputs now return a controlled `UNKNOWN_INTENT` error without launching binaries.
+
+3. **Tool Registry Enhancements**:
+   - Added `MoveWindowTool` (`move_window`) and `ResizeWindowTool` (`resize_window`) to [`services/tools/src/lib.rs`](file:///c:/Users/Admin/Desktop/my-projects/jarvis/services/tools/src/lib.rs).
+   - Unified argument parsing across all window tools to support `"target"`, `"application"`, `"app"`, and `"window_handle"`.
+
+4. **Voice Pipeline Architecture**:
+   - Both typed text and STT output route through the exact same `Orchestrator::execute_command` pipeline. Voice subsystem remains 100% functional and untouched.
+
+5. **Testing & Verification**:
+   - Unit tests: **73 / 73 workspace unit tests passing (100%)** across 20 crates.
+   - Clippy: **0 errors**.
+   - TypeScript: **0 errors**.
+   - App launch regression: `"open chrome"` and `"open spotify"` verified working.
+
+## Session 010 — 2026-08-18 (Phase 06 System Trays & System Control Integration)
+
+**Phase:** 06 (Desktop Platform Foundation)  
+**Milestone:** M06.04 (Desktop System Trays & System Control Integration)  
+**Task:** T06.04.001  
+**Status:** COMPLETE & VERIFIED ✅
+
+1. **System Tray Integration**:
+   - Integrated native Tauri v2 System Tray (`TrayIconBuilder`, `MenuBuilder`, `MenuItemBuilder`) in [`apps/desktop/src-tauri/src/lib.rs`](file:///c:/Users/Admin/Desktop/my-projects/jarvis/apps/desktop/src-tauri/src/lib.rs).
+   - Added tray menu items: `"Show / Hide JARVIS HUD"`, `"Pause / Resume Assistant"`, `"Quit JARVIS"`.
+   - Enabled `"tray-icon"` feature in [`apps/desktop/src-tauri/Cargo.toml`](file:///c:/Users/Admin/Desktop/my-projects/jarvis/apps/desktop/src-tauri/Cargo.toml).
+
+2. **System Control Platform Adapter Methods**:
+   - Added system control methods to `PlatformAdapter` trait ([`crates/platform/src/lib.rs`](file:///c:/Users/Admin/Desktop/my-projects/jarvis/crates/platform/src/lib.rs)): `get_system_volume`, `set_system_volume`, `set_system_mute`, `lock_workstation`, `shutdown_system`, `restart_system`, `sleep_system`.
+   - Implemented native Win32 FFI & PowerShell system management in `WindowsPlatformAdapter` ([`platforms/windows/src/lib.rs`](file:///c:/Users/Admin/Desktop/my-projects/jarvis/platforms/windows/src/lib.rs)): `LockWorkStation` Win32 API, `WScript.Shell` volume/mute keys, `shutdown.exe /s /r`, `SetSuspendState`.
+
+3. **Tool Registry & Policy Security**:
+   - Implemented 7 new built-in tools in [`services/tools/src/lib.rs`](file:///c:/Users/Admin/Desktop/my-projects/jarvis/services/tools/src/lib.rs): `SetSystemVolumeTool`, `MuteSystemVolumeTool`, `LockWorkstationTool`, `ShutdownSystemTool`, `RestartSystemTool`, `SleepSystemTool`, `GetSystemInfoTool`.
+   - Enforced Policy Engine security rules: `shutdown_system` & `restart_system` (`RiskLevel::Critical`), `sleep_system` (`RiskLevel::High`), `lock_workstation` (`RiskLevel::Medium`), `set_system_volume` & `get_system_info` (`RiskLevel::Low`).
+
+4. **Intent Routing**:
+   - Updated `parse_intent()` in [`core/orchestrator/src/lib.rs`](file:///c:/Users/Admin/Desktop/my-projects/jarvis/core/orchestrator/src/lib.rs) for volume control, mute, lock, shutdown, restart, sleep, and system info commands.
+
+5. **Testing & Verification**:
+   - Unit & Integration: **79 / 79 workspace unit tests passing (100%)** across 20 crates.
+   - Clippy: **0 errors**.
+   - TypeScript: **0 errors**.
+   - Window Management Regression: All window management tools (`list_windows`, `focus`, `minimize`, `maximize`, `restore`, `move`, `resize`) & application launchers (`open Chrome`, `open Spotify`) verified 100% operational.
+
+## Session 011 — 2026-08-18 (Phase 06 M06.04 Process Management & Process Query Fix)
+
+**Phase:** 06 (Desktop Platform Foundation)  
+**Milestone:** M06.04 (Process Management)  
+**Task:** T06.04.001  
+**Status:** COMPLETE & VERIFIED ✅
+
+1. **Root Cause Analysis & Fixes**:
+   - **Root Cause 1 (`is notepad running?`):** Command trailing punctuation (`'?'`, `'.'`) caused string matching condition `text.ends_with(" running")` to fail intent parsing. Fixed by introducing `clean_text` (`trim_end_matches(['?', '.', '!', ';'])`) and robust substring matching between `"is "` and `" running"`.
+   - **Root Cause 2 (`list processes`):** Updated intent parser rules to match `"list processes?"`, `"list_processes"`, `"show running processes"`, and commands containing `"list processes"` or `"running processes"`.
+   - **Spoken Companion Responses:** Added custom natural spoken formatters for `close_application` (`"Notepad has been closed, sir."`), `is_application_running` (`"Yes, Notepad is currently running, sir."` / `"No, Notepad is not running, sir."`), and `list_processes` (`"Found X active processes running on the system, sir."`).
+
+2. **Tool Definitions**:
+   - `CloseApplicationTool` (`close_application`, `RiskLevel::Medium`) in [`services/tools/src/lib.rs`](file:///c:/Users/Admin/Desktop/my-projects/jarvis/services/tools/src/lib.rs).
+   - `KillProcessTool` (`kill_process`, `RiskLevel::Medium`) in [`services/tools/src/lib.rs`](file:///c:/Users/Admin/Desktop/my-projects/jarvis/services/tools/src/lib.rs).
+   - `ListProcessesTool` (`list_processes`, `RiskLevel::Low`) in [`services/tools/src/lib.rs`](file:///c:/Users/Admin/Desktop/my-projects/jarvis/services/tools/src/lib.rs).
+   - `IsApplicationRunningTool` (`is_application_running`, `RiskLevel::Low`) in [`services/tools/src/lib.rs`](file:///c:/Users/Admin/Desktop/my-projects/jarvis/services/tools/src/lib.rs).
+
+3. **Testing & Verification**:
+   - Workspace Unit & Integration: **83 / 83 tests passing (100%)** across 20 crates.
+   - Clippy: **0 errors**.
+   - TypeScript: **0 errors**.
+   - Manual Windows Acceptance Verification:
+     1. `"is notepad running?"` $\rightarrow$ Reports Notepad is not running (`false`).
+     2. `"open notepad"` $\rightarrow$ Launches Notepad.
+     3. `"is notepad running?"` $\rightarrow$ Reports Notepad is currently running (`true`).
+     4. `"list processes"` $\rightarrow$ Returns running active processes.
+     5. `"close notepad"` $\rightarrow$ Closes Notepad.
+     6. `"is notepad running?"` $\rightarrow$ Reports Notepad is no longer running (`false`).
+
+## Session 012 — 2026-08-18 (Phase 06 M06.05 Screenshot Capture & HUD Persistence)
+
+**Phase:** 06 (Desktop Platform Foundation)  
+**Milestone:** M06.05 (Screenshot Capture)  
+**Task:** T06.05.001  
+**Status:** COMPLETE & VERIFIED ✅
+
+1. **Platform Adapter & Storage Layer**:
+   - Enhanced `WindowsPlatformAdapter` (`take_screenshot`, `take_screenshot_display`, `take_screenshot_region`) in [`platforms/windows/src/lib.rs`](file:///c:/Users/Admin/Desktop/my-projects/jarvis/platforms/windows/src/lib.rs) to capture exact display dimensions (`width`, `height`) and base64 PNG data via PowerShell GDI+.
+   - Added `get_jarvis_screenshots_dir()` and `save_screenshot_artifact()` in [`services/tools/src/lib.rs`](file:///c:/Users/Admin/Desktop/my-projects/jarvis/services/tools/src/lib.rs) persisting PNG screenshots to `%USERPROFILE%\Pictures\JARVIS\Screenshots\` with collision-safe timestamped filenames (`jarvis_YYYY-MM-DD_HH-MM-SS_mmm.png`).
+
+2. **Tool Definitions & Metadata**:
+   - Implemented `TakeScreenshotTool` (`take_screenshot`), `TakeScreenshotDisplayTool` (`take_screenshot_display`), and `TakeScreenshotRegionTool` (`take_screenshot_region`) returning structured JSON artifact metadata (`success`, `artifact_type: "screenshot"`, `mime_type: "image/png"`, `format: "png"`, `path`, `filename`, `width`, `height`, `display_index`, `bytes_len`, `status_message`).
+   - Registered all screenshot tools in `ToolRegistry::with_builtins()`.
+
+3. **Security Path Validation & Tauri Commands**:
+   - Implemented `validate_screenshot_path()` in [`apps/desktop/src-tauri/src/lib.rs`](file:///c:/Users/Admin/Desktop/my-projects/jarvis/apps/desktop/src-tauri/src/lib.rs) rejecting path traversal (`..`, `../`, `..\`) and enforcing strict containment inside `%USERPROFILE%\Pictures\JARVIS\Screenshots\`.
+   - Added Tauri IPC commands `get_screenshot_base64(path)` (returns base64 data URL for native WebView display) and `open_screenshot(path)` (spawns OS default image viewer).
+
+4. **HUD UI Presentation & Artifact Preview**:
+   - Updated `ExecutionTelemetry` in [`apps/desktop/src/types/hud.ts`](file:///c:/Users/Admin/Desktop/my-projects/jarvis/apps/desktop/src/types/hud.ts) and [`apps/desktop/src/components/Hud/Hud.tsx`](file:///c:/Users/Admin/Desktop/my-projects/jarvis/apps/desktop/src/components/Hud/Hud.tsx).
+   - Rendered holographic screenshot preview card with image thumbnail, filename, pixel dimensions, and an "OPEN IMAGE" button in [`apps/desktop/src/components/Hud/HudTranscript.tsx`](file:///c:/Users/Admin/Desktop/my-projects/jarvis/apps/desktop/src/components/Hud/HudTranscript.tsx) and [`apps/desktop/src/components/Hud/Hud.css`](file:///c:/Users/Admin/Desktop/my-projects/jarvis/apps/desktop/src/components/Hud/Hud.css).
+
+5. **Testing & Verification**:
+   - Unit & Integration: **87 / 87 workspace unit tests passing (100%)** across 20 crates.
+   - Security unit test `test_validate_screenshot_path_security` passing.
+   - Clippy: **0 errors**.
+   - TypeScript: **0 errors**.
+   - Manual Windows Verification: Full desktop, display index, and region screenshots generated and persisted under `%USERPROFILE%\Pictures\JARVIS\Screenshots\`. Preview card and Open image action confirmed working.
+
+## Session 013 — 2026-08-18 (Phase 06 M06.06 Clipboard Read/Write Implementation)
+
+**Phase:** 06 (Desktop Platform Foundation)  
+**Milestone:** M06.06 (Clipboard Read/Write)  
+**Task:** T06.06.001  
+**Status:** COMPLETE & VERIFIED ✅
+
+1. **Win32 Platform Adapter Native FFI**:
+   - Added Win32 User32/Kernel32 clipboard FFI function bindings in `mod sys` ([`platforms/windows/src/lib.rs`](file:///c:/Users/Admin/Desktop/my-projects/jarvis/platforms/windows/src/lib.rs)): `OpenClipboard`, `CloseClipboard`, `EmptyClipboard`, `GetClipboardData`, `SetClipboardData`, `IsClipboardFormatAvailable`, `GlobalAlloc`, `GlobalLock`, `GlobalUnlock`, `GlobalFree`.
+   - Updated `WindowsPlatformAdapter::get_clipboard()` and `set_clipboard()` to use native Win32 `CF_UNICODETEXT` (supporting full UTF-16 Unicode, multiline text, emojis, quotes, and empty clipboard) with PowerShell fallback.
+
+2. **Tool Registry & Built-in Tools**:
+   - Implemented `GetClipboardTool` (`get_clipboard`, `RiskLevel::Low`) and `SetClipboardTool` (`set_clipboard`, `RiskLevel::Low`) in [`services/tools/src/lib.rs`](file:///c:/Users/Admin/Desktop/my-projects/jarvis/services/tools/src/lib.rs).
+   - Registered both tools in `ToolRegistry::with_builtins()`.
+   - Configured `PolicyEngine::new()` default risk level overrides for `get_clipboard` and `set_clipboard` as `RiskLevel::Low`.
+
+3. **Audit Privacy & Security**:
+   - Enforced privacy redaction rule in `GetClipboardTool` and `SetClipboardTool`: raw clipboard text is NOT written to persistent tracing audit logs. Only character length (`text_len`) is recorded in telemetry logs.
+
+4. **Intent Routing & Spoken Companion Responses**:
+   - Added intent parser rules in [`core/orchestrator/src/lib.rs`](file:///c:/Users/Admin/Desktop/my-projects/jarvis/core/orchestrator/src/lib.rs) for read/get clipboard (`"what's in my clipboard"`, `"read my clipboard"`, `"show clipboard"`, `"get_clipboard"`) and set/copy clipboard (`"copy hello world to my clipboard"`, `"copy this to my clipboard: hello world"`, `"put hello world in my clipboard"`, `"set clipboard to hello world"`, `"copy hello world"`).
+   - Formatted companion spoken responses: `get_clipboard` (`"Here is what is in your clipboard: <text>"` or `"Your clipboard is currently empty, sir."`), `set_clipboard` (`"Copied <text> to your clipboard, sir."`).
+
+5. **Testing & Verification**:
+   - Unit & Integration: **89 / 89 workspace unit tests passing (100%)** across 20 crates.
+   - Tested simple text, multiline, Unicode (`"JARVIS — नमस्ते — 日本語"`), empty clipboard, intent routing, policy evaluation, and privacy redaction.
+   - Clippy: **0 errors**.
+   - TypeScript: **0 errors**.
+
+## Session 014 — 2026-08-18 (Phase 06 M06.07 Windows Notifications Implementation & Phase 06 Completion)
+
+**Phase:** 06 (Desktop Platform Foundation — 100% COMPLETE ✅)  
+**Milestone:** M06.07 (Windows Notifications)  
+**Task:** T06.07.001  
+**Status:** COMPLETE & VERIFIED ✅
+
+1. **Win32 Platform Adapter Native Notification Enhancements**:
+   - Enhanced `WindowsPlatformAdapter::show_notification()` in [`platforms/windows/src/lib.rs`](file:///c:/Users/Admin/Desktop/my-projects/jarvis/platforms/windows/src/lib.rs) using PowerShell GDI+ `System.Windows.Forms.NotifyIcon` & `System.Drawing.SystemIcons::Information`.
+   - Added PowerShell string escaping (`escape_ps` for backticks, quotes, dollar signs) preventing syntax injection.
+   - Added `Start-Sleep -Milliseconds 1500` delay ensuring Windows Shell receives and displays toast/balloon notifications before icon disposal.
+   - Preserved Linux `notify-send` compatibility in [`platforms/linux/src/lib.rs`](file:///c:/Users/Admin/Desktop/my-projects/jarvis/platforms/linux/src/lib.rs).
+
+2. **Tool Registry & Built-in Tools**:
+   - Implemented `ShowNotificationTool` (`show_notification`, `RiskLevel::Low`) in [`services/tools/src/lib.rs`](file:///c:/Users/Admin/Desktop/my-projects/jarvis/services/tools/src/lib.rs) accepting `title` (default `"JARVIS"`), `message`/`body`, `priority`, `timeout_secs`.
+   - Registered `ShowNotificationTool` in `ToolRegistry::with_builtins()`.
+   - Configured `PolicyEngine::new()` default risk level override for `show_notification` as `RiskLevel::Low`.
+
+3. **Intent Routing & Spoken Responses**:
+   - Added intent parser rules in [`core/orchestrator/src/lib.rs`](file:///c:/Users/Admin/Desktop/my-projects/jarvis/core/orchestrator/src/lib.rs) matching `"notify me"`, `"send me a notification saying hello"`, `"show a notification titled JARVIS saying hello"`, `"notify me that the task is complete"`, etc.
+   - Added spoken companion response: `"Notification displayed, sir."`.
+
+4. **Testing & Verification**:
+   - Unit & Integration: **92 / 92 workspace unit tests passing (100%)** across 20 crates.
+   - Clippy: **0 errors**.
+   - TypeScript: **0 errors**.
+   - Manual Windows Verification: Tested native notification toasts `"send me a notification saying hello from JARVIS"` and `"show a notification titled JARVIS saying Chrome has opened"`.
+   - Regression Suites: 100% passing across app launcher, process management, window management, screenshot capture, and clipboard read/write.
+
 ---
 
 *Log maintained by: JARVIS Development Agent*

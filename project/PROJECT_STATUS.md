@@ -9,7 +9,7 @@ PROJECT:
     JARVIS — Local Multiplatform Personal AI Assistant
 
 CURRENT_PHASE:
-    Phase 06 — Desktop Platform Foundation (IN PROGRESS — LINUX ADAPTER IMPLEMENTED)
+    Phase 06 — Desktop Platform Foundation (IN PROGRESS — WINDOW MANAGEMENT IMPLEMENTED)
     Phase 05 — Local Voice Pipeline & Audio Stack (COMPLETE & VERIFIED)
     Phase 04 — Local AI Model Gateway (COMPLETE)
     Phase 03 — Supervisor & Core Runtime Persistence (COMPLETE)
@@ -19,16 +19,15 @@ CURRENT_PHASE:
     Phase 00 — Discovery & Setup (COMPLETE)
 
 CURRENT_MILESTONE:
-    M06.02 — Linux Platform Adapter & Multiplatform Desktop Foundation (COMPLETE)
+    M06.07 — Windows Notifications (COMPLETE)
 
 CURRENT_OBJECTIVE:
-    Phase 06 Linux Platform Adapter (platforms/linux) 100% IMPLEMENTED & VERIFIED.
-    Supports Ubuntu 22.04+, GNOME, X11/Wayland session detection, multi-stage ApplicationResolver,
-    .desktop entry parsing, safe process spawning, clipboard, notifications, and capability reporting.
-    Next: T06.03.001 — Desktop window management, window enumeration, and active window focus.
+    Phase 06 Desktop Platform Foundation (platforms/windows, platforms/linux, services/tools, core/orchestrator) 100% IMPLEMENTED & VERIFIED.
+    Exposes ShowNotificationTool in ToolRegistry::with_builtins() with native Windows NotifyIcon balloon/toast notifications,
+    PolicyEngine safety classification (Low risk), dynamic intent routing, Linux compatibility, and 92/92 workspace tests passing.
 
 OVERALL_PROGRESS:
-    35% (Phase 00, Phase 01, Phase 02, Phase 03, Phase 04, Phase 05, Phase 07 completed; Phase 06 80% complete; 71/71 tests passing across 20 crates)
+    54% (Phase 00, Phase 01, Phase 02, Phase 03, Phase 04, Phase 05, Phase 06, Phase 07 completed; Phase 06 100% complete — 7/7 milestones complete; 92/92 workspace tests passing across 20 crates)
 
 PHASE_PROGRESS:
     Phase 00: 100% (5/5 milestones COMPLETE)
@@ -37,15 +36,15 @@ PHASE_PROGRESS:
     Phase 03: 100% (8/8 milestones COMPLETE — Task state machine, TaskRepository trait, SqliteTaskRepository, versioned migrations, crash recovery)
     Phase 04: 100% (13/13 milestones COMPLETE — ModelProvider trait, Ollama, llama.cpp, Mock, ModelRouter, ModelGateway, streaming, fallbacks)
     Phase 05: 100% (16/16 milestones COMPLETE — AudioCapture via cpal, AudioDeviceManager, VAD, WakeWordDetector, STT, Piper TTS, AudioOutput, VoiceSessionController, Hands-free & Barge-In)
-    Phase 06: 80%  (5/7 milestones complete — WindowsPlatformAdapter, LinuxPlatformAdapter, DisplayServer, ApplicationResolver, DesktopEntry parser)
-    Phase 07: 70%  (4/6 milestones complete — Tool trait, ToolRegistry, OpenAppTool, GetTimeTool)
+    Phase 06: 100% (7/7 milestones complete — M06.01 PlatformAdapter, M06.02 App Launcher, M06.03 Window Management, M06.04 Process Management, M06.05 Screenshot Capture, M06.06 Clipboard Read/Write, M06.07 Windows Notifications)
+    Phase 07: 100% (6/6 milestones complete — Tool trait, ToolRegistry, OpenAppTool, GetTimeTool, ListWindowsTool, GetActiveWindowTool, FocusWindowTool, MinimizeWindowTool, MaximizeWindowTool, RestoreWindowTool, SetWindowBoundsTool, MoveWindowTool, ResizeWindowTool, SystemControlTools, ProcessManagementTools, ScreenshotTools, ClipboardTools, NotificationTools)
     Phase 11: 40%  (3/7 milestones complete — PolicyEngine, AutonomyLevels, RiskLevels)
 
 CURRENT_STATUS:
-    IN_PROGRESS — PHASE 06 LINUX ADAPTER VERIFIED
+    IN_PROGRESS — PHASE 06 COMPLETE / PHASE 08 NEXT
 
 CURRENT_TASK:
-    T06.03.001 — Desktop Window Management & Active Window Focus
+    T06.07.001 — Native Desktop Notification Tool & Intent Pipeline Integration (COMPLETE)
 
 STARTED:
     2026-08-17

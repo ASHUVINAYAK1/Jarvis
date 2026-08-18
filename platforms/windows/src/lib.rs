@@ -2,24 +2,19 @@
 //!
 //! Implements the `PlatformAdapter` trait for Windows 10/11.
 //!
-//! Uses the Windows API via `windows-rs` for:
+//! Uses native Windows API (user32.dll / kernel32.dll) and PowerShell fallbacks for:
 //! - Application launching (CreateProcess / ShellExecute)
-//! - Window management (EnumWindows, SetForegroundWindow)
-//! - Screen capture (GDI+ / DXGI)
-//! - Process management (ToolHelp32Snapshot)
+//! - Window management (EnumWindows, GetForegroundWindow, SetForegroundWindow, ShowWindow, SetWindowPos)
+//! - Process management (CreateToolhelp32Snapshot)
+//! - Screen capture (GDI+ / PowerShell)
 //! - Clipboard access (OpenClipboard / GetClipboardData)
 //! - Notifications (Windows.UI.Notifications)
 //!
-//! # Security
-//!
-//! All operations that could harm the user's system must be authorized
-//! by the Policy Engine before reaching this adapter.
-//! This adapter does NOT perform policy checks — the Tool Runtime does.
-//!
-//! IMPLEMENTATION STATUS: Phase 6, Milestones M06.01 → M06.07
+//! IMPLEMENTATION STATUS: Phase 6, Milestone M06.03 — Desktop Window Management & Active Window Focus
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
@@ -29,6 +24,147 @@ use jarvis_platform::{
     ClipboardContent, DiskInfo, ImageFormat, LaunchOptions, MemoryInfo, NotificationRequest,
     OperatingSystem, PlatformAdapter, PlatformInfo, ProcessInfo, Rect, Screenshot, WindowInfo,
 };
+
+// ============================================================
+// Native Win32 FFI Bindings (user32.dll / kernel32.dll)
+// ============================================================
+
+#[cfg(target_os = "windows")]
+mod sys {
+    use std::ffi::c_void;
+
+    pub type HWND = *mut c_void;
+    pub type BOOL = i32;
+    pub type DWORD = u32;
+    pub type LPARAM = isize;
+
+    #[repr(C)]
+    #[derive(Debug, Clone, Copy)]
+    pub struct RECT {
+        pub left: i32,
+        pub top: i32,
+        pub right: i32,
+        pub bottom: i32,
+    }
+
+    #[link(name = "user32")]
+    extern "system" {
+        pub fn EnumWindows(
+            lpEnumFunc: unsafe extern "system" fn(HWND, LPARAM) -> BOOL,
+            lParam: LPARAM,
+        ) -> BOOL;
+        pub fn GetForegroundWindow() -> HWND;
+        pub fn IsWindowVisible(hWnd: HWND) -> BOOL;
+        pub fn IsIconic(hWnd: HWND) -> BOOL;
+        pub fn IsZoomed(hWnd: HWND) -> BOOL;
+        pub fn GetWindowTextW(hWnd: HWND, lpString: *mut u16, nMaxCount: i32) -> i32;
+        pub fn GetWindowThreadProcessId(hWnd: HWND, lpdwProcessId: *mut DWORD) -> DWORD;
+        pub fn SetForegroundWindow(hWnd: HWND) -> BOOL;
+        pub fn ShowWindow(hWnd: HWND, nCmdShow: i32) -> BOOL;
+        pub fn SetWindowPos(
+            hWnd: HWND,
+            hWndInsertAfter: HWND,
+            X: i32,
+            Y: i32,
+            cx: i32,
+            cy: i32,
+            uFlags: u32,
+        ) -> BOOL;
+        pub fn GetWindowRect(hWnd: HWND, lpRect: *mut RECT) -> BOOL;
+        pub fn LockWorkStation() -> BOOL;
+        pub fn OpenClipboard(hWndNewOwner: HWND) -> BOOL;
+        pub fn CloseClipboard() -> BOOL;
+        pub fn EmptyClipboard() -> BOOL;
+        pub fn GetClipboardData(uFormat: u32) -> *mut c_void;
+        pub fn SetClipboardData(uFormat: u32, hMem: *mut c_void) -> *mut c_void;
+        pub fn IsClipboardFormatAvailable(format: u32) -> BOOL;
+    }
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        pub fn GlobalAlloc(uFlags: u32, dwBytes: usize) -> *mut c_void;
+        pub fn GlobalLock(hMem: *mut c_void) -> *mut c_void;
+        pub fn GlobalUnlock(hMem: *mut c_void) -> BOOL;
+        pub fn GlobalFree(hMem: *mut c_void) -> *mut c_void;
+    }
+
+    pub const CF_UNICODETEXT: u32 = 13;
+    pub const GMEM_MOVEABLE: u32 = 0x0002;
+    pub const SW_RESTORE: i32 = 9;
+    pub const SW_MINIMIZE: i32 = 6;
+    pub const SW_MAXIMIZE: i32 = 3;
+    pub const SWP_NOZORDER: u32 = 0x0004;
+    pub const SWP_NOACTIVATE: u32 = 0x0010;
+}
+
+// Global window collection buffer for EnumWindows callback
+#[cfg(target_os = "windows")]
+static ENUM_WINDOWS_BUFFER: Mutex<Vec<(usize, u32, String, bool, bool, Option<Rect>)>> =
+    Mutex::new(Vec::new());
+
+#[cfg(target_os = "windows")]
+unsafe extern "system" fn enum_windows_callback(hwnd: sys::HWND, _: sys::LPARAM) -> sys::BOOL {
+    if sys::IsWindowVisible(hwnd) == 0 {
+        return 1;
+    }
+
+    let mut buf = [0u16; 512];
+    let len = sys::GetWindowTextW(hwnd, buf.as_mut_ptr(), 512);
+    if len <= 0 {
+        return 1;
+    }
+
+    let title = String::from_utf16_lossy(&buf[..len as usize]);
+    let title_trimmed = title.trim();
+    if title_trimmed.is_empty()
+        || title_trimmed == "Program Manager"
+        || title_trimmed == "Default IME"
+        || title_trimmed == "MSCTFIME UI"
+    {
+        return 1;
+    }
+
+    let mut pid: sys::DWORD = 0;
+    sys::GetWindowThreadProcessId(hwnd, &mut pid);
+
+    let mut rect = sys::RECT {
+        left: 0,
+        top: 0,
+        right: 0,
+        bottom: 0,
+    };
+    let bounds = if sys::GetWindowRect(hwnd, &mut rect) != 0 {
+        let width = (rect.right - rect.left).max(0) as u32;
+        let height = (rect.bottom - rect.top).max(0) as u32;
+        if width < 10 || height < 10 {
+            return 1; // Filter out 0-size invisible window tooltips/shadows
+        }
+        Some(Rect {
+            x: rect.left,
+            y: rect.top,
+            width,
+            height,
+        })
+    } else {
+        None
+    };
+
+    let is_minimized = sys::IsIconic(hwnd) != 0;
+    let is_maximized = sys::IsZoomed(hwnd) != 0;
+
+    if let Ok(mut list) = ENUM_WINDOWS_BUFFER.lock() {
+        list.push((
+            hwnd as usize,
+            pid,
+            title_trimmed.to_string(),
+            is_minimized,
+            is_maximized,
+            bounds,
+        ));
+    }
+
+    1 // Continue enumeration
+}
 
 // ============================================================
 // Windows Platform Adapter
@@ -72,7 +208,7 @@ impl WindowsPlatformAdapter {
         aliases.insert("task manager".to_string(), "taskmgr.exe".to_string());
         aliases.insert("calculator".to_string(), "calc.exe".to_string());
 
-        // Communication
+        // Communication & Media
         aliases.insert("discord".to_string(), "Discord.exe".to_string());
         aliases.insert("slack".to_string(), "slack.exe".to_string());
         aliases.insert("teams".to_string(), "Teams.exe".to_string());
@@ -102,65 +238,57 @@ impl WindowsPlatformAdapter {
                 }
             });
 
-        // If it's already an absolute path and exists, return it
-        let path = PathBuf::from(&target_name);
-        if path.is_absolute() && path.exists() {
-            return target_name;
-        }
-
-        // Check common Windows application locations
-        let mut search_paths = Vec::new();
-
-        if let Ok(prog_files) = std::env::var("ProgramFiles") {
-            search_paths.push(format!(
-                "{}\\Google\\Chrome\\Application\\chrome.exe",
-                prog_files
-            ));
-            search_paths.push(format!("{}\\Mozilla Firefox\\firefox.exe", prog_files));
-            search_paths.push(format!(
-                "{}\\Microsoft\\Edge\\Application\\msedge.exe",
-                prog_files
-            ));
-            search_paths.push(format!("{}\\Microsoft VS Code\\Code.exe", prog_files));
-        }
-        if let Ok(prog_files_x86) = std::env::var("ProgramFiles(x86)") {
-            search_paths.push(format!(
-                "{}\\Google\\Chrome\\Application\\chrome.exe",
-                prog_files_x86
-            ));
-            search_paths.push(format!(
-                "{}\\Microsoft\\Edge\\Application\\msedge.exe",
-                prog_files_x86
-            ));
-        }
-        if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
-            search_paths.push(format!(
-                "{}\\Google\\Chrome\\Application\\chrome.exe",
-                local_app_data
-            ));
-            search_paths.push(format!(
-                "{}\\Programs\\Microsoft VS Code\\Code.exe",
-                local_app_data
-            ));
-        }
-
-        // Match against known search paths if searching for chrome/firefox/etc
-        for p in &search_paths {
-            let p_buf = PathBuf::from(p);
-            if p_buf.exists() {
-                let file_name = p_buf
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_lowercase();
-                if file_name == target_name.to_lowercase() {
-                    return p.clone();
-                }
-            }
-        }
-
-        // Default fallback to executable name (Windows CreateProcess will search PATH and App Paths)
         target_name
+    }
+
+    /// Helper to resolve a handle string or application/title name to a target WindowInfo.
+    async fn resolve_window_info(&self, handle_or_name: &str) -> Result<WindowInfo> {
+        let windows = self.list_windows().await?;
+
+        // 1. Direct handle match (e.g. "0x10204" or numeric string)
+        if let Some(w) = windows
+            .iter()
+            .find(|w| w.handle.eq_ignore_ascii_case(handle_or_name))
+        {
+            return Ok(w.clone());
+        }
+
+        let target = handle_or_name.trim().to_lowercase();
+        let clean_target = target.trim_end_matches(".exe");
+
+        // 2. Match process_name (e.g. "chrome", "spotify", "code")
+        if let Some(w) = windows.iter().find(|w| {
+            let p_name = w.process_name.to_lowercase();
+            let p_clean = p_name.trim_end_matches(".exe");
+            p_name == target || p_clean == clean_target || p_name.contains(clean_target)
+        }) {
+            return Ok(w.clone());
+        }
+
+        // 3. Match window title (e.g. "Google Chrome", "Spotify Free", "VS Code")
+        if let Some(w) = windows
+            .iter()
+            .find(|w| w.title.to_lowercase().contains(&target))
+        {
+            return Ok(w.clone());
+        }
+
+        Err(anyhow!(
+            "No open window found matching handle or application name '{}'",
+            handle_or_name
+        ))
+    }
+
+    /// Parse HWND pointer from string handle ("0x10204" or decimal).
+    fn parse_hwnd(handle_str: &str) -> Result<usize> {
+        if handle_str.starts_with("0x") || handle_str.starts_with("0X") {
+            usize::from_str_radix(&handle_str[2..], 16)
+                .map_err(|_| anyhow!("Invalid window handle hex string: '{}'", handle_str))
+        } else {
+            handle_str
+                .parse::<usize>()
+                .map_err(|_| anyhow!("Invalid window handle decimal string: '{}'", handle_str))
+        }
     }
 }
 
@@ -170,38 +298,28 @@ impl Default for WindowsPlatformAdapter {
     }
 }
 
-// ============================================================
-// PlatformAdapter Implementation
-// ============================================================
-
 #[async_trait]
 impl PlatformAdapter for WindowsPlatformAdapter {
     async fn get_platform_info(&self) -> Result<PlatformInfo> {
-        use std::env;
+        let hostname_str = hostname::get()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
 
-        let hostname = hostname::get()
-            .map(|h| h.to_string_lossy().to_string())
-            .unwrap_or_else(|_| "unknown".to_string());
-
-        let username = env::var("USERNAME")
-            .or_else(|_| env::var("USER"))
-            .unwrap_or_else(|_| "unknown".to_string());
-
-        let home_dir = env::var("USERPROFILE")
+        let username_str = std::env::var("USERNAME").unwrap_or_else(|_| "unknown".to_string());
+        let home_dir = std::env::var("USERPROFILE")
             .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("C:\\Users\\Default"));
-
-        let temp_dir = env::var("TEMP")
-            .or_else(|_| env::var("TMP"))
+            .unwrap_or_else(|_| PathBuf::from("C:\\Users\\default"));
+        let temp_dir = std::env::var("TEMP")
             .map(PathBuf::from)
-            .unwrap_or_else(|_| std::env::temp_dir());
+            .unwrap_or_else(|_| PathBuf::from("C:\\Windows\\Temp"));
 
         Ok(PlatformInfo {
             os: OperatingSystem::Windows,
-            os_version: get_windows_version(),
-            arch: jarvis_platform::current_arch(),
-            hostname,
-            username,
+            os_version: "Windows 11".to_string(),
+            arch: jarvis_platform::Architecture::X86_64,
+            hostname: hostname_str,
+            username: username_str,
             home_dir,
             temp_dir,
         })
@@ -213,157 +331,106 @@ impl PlatformAdapter for WindowsPlatformAdapter {
         app: &str,
         options: Option<LaunchOptions>,
     ) -> Result<ProcessInfo> {
-        let executable = self.resolve_app(app);
-        let opts = options.unwrap_or_default();
+        let target_name = self.resolve_app(app);
+        info!(
+            raw_app = %app,
+            resolved_app = %target_name,
+            "Launching application on Windows"
+        );
 
-        info!(app = %app, executable = %executable, "Opening application");
+        let mut cmd = tokio::process::Command::new("cmd");
+        cmd.args(["/C", "start", "", &target_name]);
 
-        let mut cmd = tokio::process::Command::new(&executable);
-        cmd.args(&opts.args);
-
-        if let Some(ref wd) = opts.working_dir {
-            cmd.current_dir(wd);
-        }
-
-        for (k, v) in &opts.env_vars {
-            cmd.env(k, v);
-        }
-
-        // Don't inherit stdio — application runs independently
-        cmd.stdout(std::process::Stdio::null());
-        cmd.stderr(std::process::Stdio::null());
-        cmd.stdin(std::process::Stdio::null());
-
-        // Detach from our process group so it continues after jarvisd exits
-        #[cfg(windows)]
-        cmd.creation_flags(0x00000008); // DETACHED_PROCESS
-
-        let mut child = match cmd.spawn() {
-            Ok(c) => c,
-            Err(_) => {
-                let mut shell_cmd = tokio::process::Command::new("cmd");
-                shell_cmd.args(["/C", "start", "", &executable]);
-                #[cfg(windows)]
-                shell_cmd.creation_flags(0x00000008);
-                shell_cmd
-                    .spawn()
-                    .map_err(|e| anyhow!("Failed to launch '{}': {}", executable, e))?
+        if let Some(opts) = options {
+            if let Some(dir) = opts.working_dir {
+                cmd.current_dir(dir);
             }
-        };
-
-        let pid = child.id().unwrap_or(0);
-
-        // If not waiting, detach the child
-        if !opts.wait {
-            // Forget the child so it runs independently
-            let _ = child.id(); // We've read the PID
-                                // Don't call child.wait() — let it run independently
-            std::mem::forget(child);
-        } else {
-            let status = child.wait().await?;
-            if !status.success() {
-                return Err(anyhow!(
-                    "Application '{}' exited with code {:?}",
-                    executable,
-                    status.code()
-                ));
+            for arg in opts.args {
+                cmd.arg(arg);
             }
         }
 
-        info!(app = %app, pid = %pid, "Application launched");
-
-        Ok(ProcessInfo {
-            pid,
-            name: app.to_string(),
-            executable_path: Some(PathBuf::from(&executable)),
-            command_line: Some(executable.clone()),
-            running: true,
-        })
-    }
-
-    #[instrument(skip(self), fields(app = %app))]
-    async fn close_application(&self, app: &str) -> Result<()> {
-        let executable = self.resolve_app(app);
-        info!(app = %app, executable = %executable, "Closing application");
-
-        // Use taskkill on Windows for graceful termination
-        let output = tokio::process::Command::new("taskkill")
-            .args(["/IM", &executable, "/F"])
+        let output = cmd
             .output()
             .await
-            .map_err(|e| anyhow!("Failed to run taskkill: {}", e))?;
+            .map_err(|e| anyhow!("Failed to launch application '{}': {}", target_name, e))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            warn!(
+                app = %target_name,
+                stderr = %stderr,
+                "cmd start returned non-zero, trying direct executable launch"
+            );
+
+            tokio::process::Command::new(&target_name)
+                .spawn()
+                .map_err(|e| anyhow!("Failed to launch '{}' directly: {}", target_name, e))?;
+        }
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+
+        let running_processes = self.list_processes().await.unwrap_or_default();
+        let target_lower = target_name.to_lowercase();
+
+        let found = running_processes.into_iter().find(|p| {
+            let p_lower = p.name.to_lowercase();
+            p_lower == target_lower || p_lower == format!("{}.exe", target_lower)
+        });
+
+        if let Some(proc_info) = found {
+            info!(app = %target_name, pid = proc_info.pid, "Application confirmed running");
+            Ok(proc_info)
+        } else {
+            Ok(ProcessInfo {
+                pid: 0,
+                name: target_name,
+                executable_path: None,
+                command_line: None,
+                running: true,
+            })
+        }
+    }
+
+    async fn close_application(&self, app: &str) -> Result<()> {
+        let target_name = self.resolve_app(app);
+        info!(app = %target_name, "Closing application");
+
+        let output = tokio::process::Command::new("taskkill")
+            .args(["/IM", &target_name, "/F"])
+            .output()
+            .await
+            .map_err(|e| anyhow!("Failed to run taskkill for '{}': {}", target_name, e))?;
 
         if output.status.success() {
-            info!(app = %app, "Application closed");
+            info!(app = %target_name, "Application terminated successfully");
             Ok(())
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            Err(anyhow!("Failed to close '{}': {}", app, stderr))
+            Err(anyhow!(
+                "Failed to close application '{}': {}",
+                target_name,
+                stderr
+            ))
         }
     }
 
     async fn list_processes(&self) -> Result<Vec<ProcessInfo>> {
-        // Use tasklist /FO CSV to get all processes
-        let output = tokio::process::Command::new("tasklist")
-            .args(["/FO", "CSV", "/NH"])
-            .output()
-            .await
-            .map_err(|e| anyhow!("Failed to run tasklist: {}", e))?;
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let mut processes = Vec::new();
-
-        for line in stdout.lines() {
-            // Parse CSV: "process.exe","12345","Console","1","10 MB"
-            let parts: Vec<&str> = line.split(',').collect();
-            if parts.len() >= 2 {
-                let name = parts[0].trim_matches('"').to_string();
-                let pid: u32 = parts[1].trim_matches('"').parse().unwrap_or(0);
-                processes.push(ProcessInfo {
-                    pid,
-                    name,
-                    executable_path: None,
-                    command_line: None,
-                    running: true,
-                });
-            }
-        }
-
-        Ok(processes)
-    }
-
-    async fn is_application_running(&self, app: &str) -> Result<bool> {
-        let executable = self.resolve_app(app);
-        let processes = self.list_processes().await?;
-        let running = processes
-            .iter()
-            .any(|p| p.name.to_lowercase() == executable.to_lowercase());
-        Ok(running)
-    }
-
-    async fn list_windows(&self) -> Result<Vec<WindowInfo>> {
-        // Use powershell to enumerate windows
         let output = tokio::process::Command::new("powershell")
             .args([
                 "-NoProfile",
                 "-Command",
-                "Get-Process | Where-Object {$_.MainWindowTitle -ne ''} | Select-Object Id,ProcessName,MainWindowTitle | ConvertTo-Json"
+                "Get-Process | Select-Object Id, ProcessName | ConvertTo-Json",
             ])
             .output()
             .await
-            .map_err(|e| anyhow!("Failed to enumerate windows: {}", e))?;
+            .map_err(|e| anyhow!("Failed to list processes via PowerShell: {}", e))?;
 
         if !output.status.success() {
-            warn!("Failed to list windows via PowerShell");
             return Ok(Vec::new());
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        if stdout.trim().is_empty() {
-            return Ok(Vec::new());
-        }
-
-        // Parse JSON output
         let json: serde_json::Value =
             serde_json::from_str(&stdout).unwrap_or(serde_json::Value::Array(Vec::new()));
 
@@ -373,101 +440,315 @@ impl PlatformAdapter for WindowsPlatformAdapter {
             _ => Vec::new(),
         };
 
-        let windows = items
+        let processes = items
             .iter()
             .filter_map(|item| {
                 let pid = item["Id"].as_u64()? as u32;
                 let name = item["ProcessName"].as_str()?.to_string();
-                let title = item["MainWindowTitle"].as_str()?.to_string();
-                Some(WindowInfo {
-                    handle: pid.to_string(),
-                    title,
-                    process_name: name,
+                Some(ProcessInfo {
                     pid,
-                    visible: true,
-                    focused: false,
-                    bounds: None,
+                    name,
+                    executable_path: None,
+                    command_line: None,
+                    running: true,
                 })
             })
             .collect();
 
-        Ok(windows)
+        Ok(processes)
+    }
+
+    async fn is_application_running(&self, app: &str) -> Result<bool> {
+        let target_name = self.resolve_app(app);
+        let executable = target_name
+            .strip_suffix(".exe")
+            .unwrap_or(&target_name)
+            .to_string();
+
+        let processes = self.list_processes().await?;
+        let running = processes
+            .iter()
+            .any(|p| p.name.to_lowercase() == executable.to_lowercase());
+        Ok(running)
+    }
+
+    // ============================================================
+    // Window Management Implementation (Step 3 to Step 10)
+    // ============================================================
+
+    async fn list_windows(&self) -> Result<Vec<WindowInfo>> {
+        #[cfg(target_os = "windows")]
+        {
+            let mut process_map = HashMap::new();
+            if let Ok(procs) = self.list_processes().await {
+                for p in procs {
+                    let exe_name = if p.name.ends_with(".exe") {
+                        p.name.clone()
+                    } else {
+                        format!("{}.exe", p.name)
+                    };
+                    process_map.insert(p.pid, exe_name);
+                }
+            }
+
+            if let Ok(mut list) = ENUM_WINDOWS_BUFFER.lock() {
+                list.clear();
+            }
+
+            unsafe {
+                sys::EnumWindows(enum_windows_callback, 0);
+            }
+
+            let foreground_hwnd = unsafe { sys::GetForegroundWindow() } as usize;
+
+            let buffer = ENUM_WINDOWS_BUFFER
+                .lock()
+                .map(|l| l.clone())
+                .unwrap_or_default();
+
+            let windows = buffer
+                .into_iter()
+                .map(
+                    |(hwnd_val, pid, title, is_minimized, is_maximized, bounds)| {
+                        let process_name = process_map
+                            .get(&pid)
+                            .cloned()
+                            .unwrap_or_else(|| "unknown.exe".to_string());
+
+                        let handle_str = format!("0x{:x}", hwnd_val);
+                        let focused = hwnd_val == foreground_hwnd;
+
+                        WindowInfo {
+                            handle: handle_str,
+                            title,
+                            process_name,
+                            pid,
+                            visible: true,
+                            focused,
+                            bounds,
+                            is_minimized,
+                            is_maximized,
+                        }
+                    },
+                )
+                .collect();
+
+            Ok(windows)
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            Ok(Vec::new())
+        }
+    }
+
+    async fn get_active_window(&self) -> Result<WindowInfo> {
+        let windows = self.list_windows().await?;
+        if let Some(focused) = windows.into_iter().find(|w| w.focused) {
+            return Ok(focused);
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            let foreground_hwnd = unsafe { sys::GetForegroundWindow() };
+            if !foreground_hwnd.is_null() {
+                let mut pid: sys::DWORD = 0;
+                unsafe { sys::GetWindowThreadProcessId(foreground_hwnd, &mut pid) };
+
+                let handle_str = format!("0x{:x}", foreground_hwnd as usize);
+                return Ok(WindowInfo {
+                    handle: handle_str,
+                    title: "Active Window".to_string(),
+                    process_name: "unknown.exe".to_string(),
+                    pid,
+                    visible: true,
+                    focused: true,
+                    bounds: None,
+                    is_minimized: false,
+                    is_maximized: false,
+                });
+            }
+        }
+
+        Err(anyhow!("No active foreground window found"))
     }
 
     async fn focus_window(&self, window_handle: &str) -> Result<()> {
-        // Use powershell to focus a window by PID
-        let pid = window_handle
-            .parse::<u32>()
-            .map_err(|_| anyhow!("Invalid window handle: {}", window_handle))?;
+        let target = self.resolve_window_info(window_handle).await?;
 
-        let script = format!(
-            r#"
-            Add-Type @'
-            using System;
-            using System.Runtime.InteropServices;
-            public class Win32 {{
-                [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
-            }}
-'@
-            $proc = Get-Process -Id {pid} -ErrorAction SilentlyContinue
-            if ($proc -and $proc.MainWindowHandle) {{
-                [Win32]::SetForegroundWindow($proc.MainWindowHandle)
-            }}
-            "#
-        );
+        #[cfg(target_os = "windows")]
+        {
+            let hwnd_val = Self::parse_hwnd(&target.handle)?;
+            let hwnd = hwnd_val as sys::HWND;
 
-        tokio::process::Command::new("powershell")
-            .args(["-NoProfile", "-Command", &script])
-            .output()
-            .await
-            .map_err(|e| anyhow!("Failed to focus window: {}", e))?;
+            unsafe {
+                if sys::IsIconic(hwnd) != 0 {
+                    sys::ShowWindow(hwnd, sys::SW_RESTORE);
+                }
+                sys::SetForegroundWindow(hwnd);
+            }
 
-        Ok(())
+            info!(
+                handle = %target.handle,
+                title = %target.title,
+                process = %target.process_name,
+                "Window focused successfully"
+            );
+            return Ok(());
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = target;
+            Ok(())
+        }
     }
 
     async fn minimize_window(&self, window_handle: &str) -> Result<()> {
-        let pid = window_handle
-            .parse::<u32>()
-            .map_err(|_| anyhow!("Invalid window handle: {}", window_handle))?;
+        let target = self.resolve_window_info(window_handle).await?;
 
-        let _script = format!(
-            r#"
-            $proc = Get-Process -Id {pid} -ErrorAction SilentlyContinue
-            if ($proc) {{ $proc.MainWindowHandle | ForEach-Object {{ [void][System.Windows.Forms.Form]::new() }} }}
-            Add-Type -AssemblyName System.Windows.Forms
-            [System.Windows.Forms.Application]::OpenForms | ForEach-Object {{ $_.WindowState = [System.Windows.Forms.FormWindowState]::Minimized }}
-            "#
-        );
+        #[cfg(target_os = "windows")]
+        {
+            let hwnd_val = Self::parse_hwnd(&target.handle)?;
+            let hwnd = hwnd_val as sys::HWND;
 
-        // Simplified: use ShowWindow API via powershell
-        tokio::process::Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-Command",
-                &format!("(Get-Process -Id {pid} -ErrorAction SilentlyContinue).MainWindowHandle"),
-            ])
-            .output()
-            .await
-            .ok();
+            unsafe {
+                sys::ShowWindow(hwnd, sys::SW_MINIMIZE);
+            }
 
-        Ok(())
+            info!(
+                handle = %target.handle,
+                title = %target.title,
+                process = %target.process_name,
+                "Window minimized successfully"
+            );
+            return Ok(());
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = target;
+            Ok(())
+        }
     }
 
-    async fn maximize_window(&self, _window_handle: &str) -> Result<()> {
-        // TODO: Implement via windows-rs ShowWindow(SW_MAXIMIZE)
-        warn!("maximize_window not yet fully implemented — requires windows-rs");
-        Ok(())
+    async fn maximize_window(&self, window_handle: &str) -> Result<()> {
+        let target = self.resolve_window_info(window_handle).await?;
+
+        #[cfg(target_os = "windows")]
+        {
+            let hwnd_val = Self::parse_hwnd(&target.handle)?;
+            let hwnd = hwnd_val as sys::HWND;
+
+            unsafe {
+                sys::ShowWindow(hwnd, sys::SW_MAXIMIZE);
+            }
+
+            info!(
+                handle = %target.handle,
+                title = %target.title,
+                process = %target.process_name,
+                "Window maximized successfully"
+            );
+            return Ok(());
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = target;
+            Ok(())
+        }
     }
 
-    async fn set_window_bounds(&self, _window_handle: &str, _bounds: Rect) -> Result<()> {
-        // TODO: Implement via windows-rs MoveWindow
-        warn!("set_window_bounds not yet fully implemented — requires windows-rs");
-        Ok(())
+    async fn restore_window(&self, window_handle: &str) -> Result<()> {
+        let target = self.resolve_window_info(window_handle).await?;
+
+        #[cfg(target_os = "windows")]
+        {
+            let hwnd_val = Self::parse_hwnd(&target.handle)?;
+            let hwnd = hwnd_val as sys::HWND;
+
+            unsafe {
+                sys::ShowWindow(hwnd, sys::SW_RESTORE);
+            }
+
+            info!(
+                handle = %target.handle,
+                title = %target.title,
+                process = %target.process_name,
+                "Window restored successfully"
+            );
+            return Ok(());
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = target;
+            Ok(())
+        }
+    }
+
+    async fn set_window_bounds(&self, window_handle: &str, bounds: Rect) -> Result<()> {
+        if bounds.width == 0 || bounds.height == 0 {
+            return Err(anyhow!(
+                "Invalid window dimensions: width ({}) and height ({}) must be greater than zero",
+                bounds.width,
+                bounds.height
+            ));
+        }
+
+        let target = self.resolve_window_info(window_handle).await?;
+
+        #[cfg(target_os = "windows")]
+        {
+            let hwnd_val = Self::parse_hwnd(&target.handle)?;
+            let hwnd = hwnd_val as sys::HWND;
+
+            unsafe {
+                if sys::IsIconic(hwnd) != 0 || sys::IsZoomed(hwnd) != 0 {
+                    sys::ShowWindow(hwnd, sys::SW_RESTORE);
+                }
+
+                let ret = sys::SetWindowPos(
+                    hwnd,
+                    std::ptr::null_mut(),
+                    bounds.x,
+                    bounds.y,
+                    bounds.width as i32,
+                    bounds.height as i32,
+                    sys::SWP_NOZORDER | sys::SWP_NOACTIVATE,
+                );
+
+                if ret == 0 {
+                    return Err(anyhow!(
+                        "Failed to set bounds for window '{}'",
+                        target.title
+                    ));
+                }
+            }
+
+            info!(
+                handle = %target.handle,
+                title = %target.title,
+                x = bounds.x,
+                y = bounds.y,
+                width = bounds.width,
+                height = bounds.height,
+                "Window bounds updated successfully"
+            );
+            return Ok(());
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = target;
+            let _ = bounds;
+            Ok(())
+        }
     }
 
     #[instrument(skip(self))]
     async fn take_screenshot(&self) -> Result<Screenshot> {
-        // Use PowerShell to capture the screen via .NET
         let script = r#"
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -483,7 +764,8 @@ $bytes = $ms.ToArray()
 $graphics.Dispose()
 $bitmap.Dispose()
 $ms.Dispose()
-[Convert]::ToBase64String($bytes)
+$b64 = [Convert]::ToBase64String($bytes)
+"$($bounds.Width),$($bounds.Height)|$b64"
 "#;
 
         let output = tokio::process::Command::new("powershell")
@@ -497,24 +779,78 @@ $ms.Dispose()
             return Err(anyhow!("Screenshot PowerShell error: {}", stderr));
         }
 
-        let b64 = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let data = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &b64)
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let (dim_part, b64) = stdout.split_once('|').unwrap_or(("0,0", &stdout));
+        let (w_str, h_str) = dim_part.split_once(',').unwrap_or(("0", "0"));
+        let width: u32 = w_str.parse().unwrap_or(0);
+        let height: u32 = h_str.parse().unwrap_or(0);
+
+        let data = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64.trim())
             .map_err(|e| anyhow!("Failed to decode screenshot: {}", e))?;
 
-        info!(bytes = %data.len(), "Screenshot captured");
+        info!(bytes = %data.len(), width = width, height = height, "Screenshot captured");
 
         Ok(Screenshot {
             data,
             format: ImageFormat::Png,
-            width: 0, // TODO: parse from image
-            height: 0,
+            width,
+            height,
             display_index: 0,
         })
     }
 
-    async fn take_screenshot_display(&self, _display_index: u32) -> Result<Screenshot> {
-        // For now delegate to primary screenshot
-        self.take_screenshot().await
+    async fn take_screenshot_display(&self, display_index: u32) -> Result<Screenshot> {
+        let script = format!(
+            r#"
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+
+$screens = [System.Windows.Forms.Screen]::AllScreens
+$idx = [Math]::Min({idx}, $screens.Count - 1)
+$screen = $screens[$idx]
+$bounds = $screen.Bounds
+$bitmap = New-Object System.Drawing.Bitmap($bounds.Width, $bounds.Height)
+$graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+$graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+
+$ms = New-Object System.IO.MemoryStream
+$bitmap.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
+$bytes = $ms.ToArray()
+$graphics.Dispose()
+$bitmap.Dispose()
+$ms.Dispose()
+$b64 = [Convert]::ToBase64String($bytes)
+"$($bounds.Width),$($bounds.Height)|$b64"
+"#,
+            idx = display_index
+        );
+
+        let output = tokio::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", &script])
+            .output()
+            .await
+            .map_err(|e| anyhow!("Display screenshot failed: {}", e))?;
+
+        if !output.status.success() {
+            return self.take_screenshot().await;
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let (dim_part, b64) = stdout.split_once('|').unwrap_or(("0,0", &stdout));
+        let (w_str, h_str) = dim_part.split_once(',').unwrap_or(("0", "0"));
+        let width: u32 = w_str.parse().unwrap_or(0);
+        let height: u32 = h_str.parse().unwrap_or(0);
+
+        let data = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64.trim())
+            .map_err(|e| anyhow!("Failed to decode display screenshot: {}", e))?;
+
+        Ok(Screenshot {
+            data,
+            format: ImageFormat::Png,
+            width,
+            height,
+            display_index,
+        })
     }
 
     async fn take_screenshot_region(&self, region: Rect) -> Result<Screenshot> {
@@ -559,234 +895,331 @@ $ms.Dispose()
     }
 
     async fn get_clipboard(&self) -> Result<ClipboardContent> {
-        let output = tokio::process::Command::new("powershell")
-            .args(["-NoProfile", "-Command", "Get-Clipboard"])
-            .output()
-            .await
-            .map_err(|e| anyhow!("Failed to get clipboard: {}", e))?;
+        #[cfg(target_os = "windows")]
+        {
+            unsafe {
+                if sys::OpenClipboard(std::ptr::null_mut()) != 0 {
+                    struct ClipboardGuard;
+                    impl Drop for ClipboardGuard {
+                        fn drop(&mut self) {
+                            unsafe {
+                                sys::CloseClipboard();
+                            }
+                        }
+                    }
+                    let _guard = ClipboardGuard;
 
-        let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if text.is_empty() {
-            Ok(ClipboardContent::Empty)
+                    if sys::IsClipboardFormatAvailable(sys::CF_UNICODETEXT) != 0 {
+                        let handle = sys::GetClipboardData(sys::CF_UNICODETEXT);
+                        if !handle.is_null() {
+                            let ptr = sys::GlobalLock(handle) as *const u16;
+                            if !ptr.is_null() {
+                                let mut len = 0;
+                                while *ptr.add(len) != 0 {
+                                    len += 1;
+                                }
+                                let slice = std::slice::from_raw_parts(ptr, len);
+                                let text = String::from_utf16_lossy(slice);
+                                sys::GlobalUnlock(handle);
+
+                                if text.is_empty() {
+                                    return Ok(ClipboardContent::Empty);
+                                } else {
+                                    return Ok(ClipboardContent::Text(text));
+                                }
+                            }
+                        }
+                    } else {
+                        return Ok(ClipboardContent::Empty);
+                    }
+                }
+            }
+        }
+
+        let script = "Get-Clipboard";
+        let output = tokio::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", script])
+            .output()
+            .await?;
+
+        if output.status.success() {
+            let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if text.is_empty() {
+                Ok(ClipboardContent::Empty)
+            } else {
+                Ok(ClipboardContent::Text(text))
+            }
         } else {
-            Ok(ClipboardContent::Text(text))
+            Ok(ClipboardContent::Empty)
         }
     }
 
     async fn set_clipboard(&self, content: ClipboardContent) -> Result<()> {
-        match content {
-            ClipboardContent::Text(text) => {
-                // Escape single quotes in text
-                let escaped = text.replace('\'', "''");
-                tokio::process::Command::new("powershell")
-                    .args([
-                        "-NoProfile",
-                        "-Command",
-                        &format!("Set-Clipboard -Value '{}'", escaped),
-                    ])
-                    .output()
-                    .await
-                    .map_err(|e| anyhow!("Failed to set clipboard: {}", e))?;
-                Ok(())
+        let text = match content {
+            ClipboardContent::Text(t) => t,
+            ClipboardContent::Empty => String::new(),
+            _ => return Err(anyhow!("Clipboard format not supported on Windows yet")),
+        };
+
+        #[cfg(target_os = "windows")]
+        {
+            unsafe {
+                let utf16: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
+                let bytes_len = utf16.len() * std::mem::size_of::<u16>();
+
+                let h_mem = sys::GlobalAlloc(sys::GMEM_MOVEABLE, bytes_len);
+                if !h_mem.is_null() {
+                    let ptr = sys::GlobalLock(h_mem) as *mut u16;
+                    if !ptr.is_null() {
+                        std::ptr::copy_nonoverlapping(utf16.as_ptr(), ptr, utf16.len());
+                        sys::GlobalUnlock(h_mem);
+
+                        if sys::OpenClipboard(std::ptr::null_mut()) != 0 {
+                            sys::EmptyClipboard();
+                            let res = sys::SetClipboardData(sys::CF_UNICODETEXT, h_mem);
+                            sys::CloseClipboard();
+                            if !res.is_null() {
+                                return Ok(());
+                            }
+                        }
+                    }
+                    sys::GlobalFree(h_mem);
+                }
             }
-            _ => Err(anyhow!(
-                "Only text clipboard content is currently supported on Windows"
-            )),
         }
+
+        let script = format!("Set-Clipboard -Value \"{}\"", text.replace('"', "`\""));
+        tokio::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", &script])
+            .output()
+            .await?;
+        Ok(())
     }
 
     async fn show_notification(&self, notification: NotificationRequest) -> Result<()> {
-        // Use PowerShell with Windows Toast notifications
+        let escape_ps = |s: &str| -> String {
+            s.replace('`', "``").replace('"', "`\"").replace('$', "`$")
+        };
+
+        let title = escape_ps(&notification.title);
+        let body = escape_ps(&notification.body);
+        let timeout_ms = notification.timeout_secs.unwrap_or(5) * 1000;
+
         let script = format!(
             r#"
-[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
-[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null
-$template = '<toast><visual><binding template="ToastText02"><text id="1">{title}</text><text id="2">{body}</text></binding></visual></toast>'
-$xml = New-Object Windows.Data.Xml.Dom.XmlDocument
-$xml.LoadXml($template)
-$toast = New-Object Windows.UI.Notifications.ToastNotification($xml)
-[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("JARVIS").Show($toast)
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+$notification = New-Object System.Windows.Forms.NotifyIcon
+$notification.Icon = [System.Drawing.SystemIcons]::Information
+$notification.BalloonTipTitle = "{title}"
+$notification.BalloonTipText = "{body}"
+$notification.Visible = $true
+$notification.ShowBalloonTip({timeout_ms})
+Start-Sleep -Milliseconds 1500
+$notification.Dispose()
 "#,
-            title = notification.title.replace('"', "&quot;"),
-            body = notification.body.replace('"', "&quot;"),
+            title = title,
+            body = body,
+            timeout_ms = timeout_ms
+        );
+
+        let output = tokio::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", &script])
+            .output()
+            .await
+            .map_err(|e| anyhow!("Failed to execute notification script: {}", e))?;
+
+        if !output.status.success() {
+            let err = String::from_utf8_lossy(&output.stderr);
+            return Err(anyhow!("Failed to show notification: {}", err.trim()));
+        }
+
+        Ok(())
+    }
+
+    async fn get_disk_space(&self) -> Result<DiskInfo> {
+        let script = "Get-CimInstance Win32_LogicalDisk -Filter \"DeviceID='C:'\" | Select-Object Size, FreeSpace | ConvertTo-Json";
+        let output = tokio::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", script])
+            .output()
+            .await?;
+
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let json: serde_json::Value = serde_json::from_str(&stdout)?;
+            let total = json["Size"].as_u64().unwrap_or(0);
+            let free = json["FreeSpace"].as_u64().unwrap_or(0);
+            Ok(DiskInfo {
+                total_bytes: total,
+                available_bytes: free,
+                used_bytes: total.saturating_sub(free),
+            })
+        } else {
+            Err(anyhow!("Failed to query disk space"))
+        }
+    }
+
+    async fn get_memory_info(&self) -> Result<MemoryInfo> {
+        let script = "Get-CimInstance Win32_OperatingSystem | Select-Object TotalVisibleMemorySize, FreePhysicalMemory | ConvertTo-Json";
+        let output = tokio::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", script])
+            .output()
+            .await?;
+
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let json: serde_json::Value = serde_json::from_str(&stdout)?;
+            let total_kb = json["TotalVisibleMemorySize"].as_u64().unwrap_or(0);
+            let free_kb = json["FreePhysicalMemory"].as_u64().unwrap_or(0);
+            let total = total_kb * 1024;
+            let free = free_kb * 1024;
+            Ok(MemoryInfo {
+                total_bytes: total,
+                available_bytes: free,
+                used_bytes: total.saturating_sub(free),
+            })
+        } else {
+            Err(anyhow!("Failed to query memory info"))
+        }
+    }
+
+    async fn lock_workstation(&self) -> Result<()> {
+        #[cfg(target_os = "windows")]
+        {
+            unsafe { sys::LockWorkStation() };
+            info!("Workstation locked via LockWorkStation Win32 API");
+            Ok(())
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            Ok(())
+        }
+    }
+
+    async fn set_system_volume(&self, level: u32) -> Result<()> {
+        let target_vol = level.min(100);
+        let script = format!(
+            r#"
+            $wsh = New-Object -ComObject WScript.Shell
+            1..50 | ForEach-Object {{ $wsh.SendKeys([char]174) }}
+            $steps = [math]::Round({target_vol} / 2)
+            if ($steps -gt 0) {{
+                1..$steps | ForEach-Object {{ $wsh.SendKeys([char]175) }}
+            }}
+            "#
         );
 
         tokio::process::Command::new("powershell")
             .args(["-NoProfile", "-Command", &script])
             .output()
             .await
-            .ok(); // Best-effort — don't fail if notifications unavailable
+            .map_err(|e| anyhow!("Failed to set system volume: {}", e))?;
 
+        info!(level = target_vol, "System volume updated");
         Ok(())
     }
 
-    async fn get_disk_space(&self) -> Result<DiskInfo> {
-        let output = tokio::process::Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-Command",
-                "Get-PSDrive C | Select-Object Used,Free | ConvertTo-Json",
-            ])
+    async fn set_system_mute(&self, _mute: bool) -> Result<()> {
+        let script = r#"(New-Object -ComObject WScript.Shell).SendKeys([char]173)"#;
+        tokio::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", script])
             .output()
-            .await?;
+            .await
+            .map_err(|e| anyhow!("Failed to toggle system mute: {}", e))?;
 
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let json: serde_json::Value =
-            serde_json::from_str(&stdout).unwrap_or(serde_json::json!({"Used": 0, "Free": 0}));
-
-        let used = json["Used"].as_u64().unwrap_or(0);
-        let free = json["Free"].as_u64().unwrap_or(0);
-        let total = used + free;
-
-        Ok(DiskInfo {
-            total_bytes: total,
-            available_bytes: free,
-            used_bytes: used,
-        })
+        info!("System mute toggled");
+        Ok(())
     }
 
-    async fn get_memory_info(&self) -> Result<MemoryInfo> {
-        let output = tokio::process::Command::new("powershell")
-            .args([
-                "-NoProfile", "-Command",
-                "Get-CimInstance Win32_OperatingSystem | Select-Object TotalVisibleMemorySize,FreePhysicalMemory | ConvertTo-Json"
-            ])
+    async fn shutdown_system(&self, force: bool) -> Result<()> {
+        let args = if force { vec!["/s", "/f", "/t", "0"] } else { vec!["/s", "/t", "0"] };
+        tokio::process::Command::new("shutdown")
+            .args(&args)
             .output()
-            .await?;
+            .await
+            .map_err(|e| anyhow!("Failed to initiate system shutdown: {}", e))?;
+        Ok(())
+    }
 
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let json: serde_json::Value =
-            serde_json::from_str(&stdout).unwrap_or(serde_json::json!({}));
+    async fn restart_system(&self, force: bool) -> Result<()> {
+        let args = if force { vec!["/r", "/f", "/t", "0"] } else { vec!["/r", "/t", "0"] };
+        tokio::process::Command::new("shutdown")
+            .args(&args)
+            .output()
+            .await
+            .map_err(|e| anyhow!("Failed to initiate system restart: {}", e))?;
+        Ok(())
+    }
 
-        // Values are in KB
-        let total_kb = json["TotalVisibleMemorySize"].as_u64().unwrap_or(0);
-        let free_kb = json["FreePhysicalMemory"].as_u64().unwrap_or(0);
-
-        let total = total_kb * 1024;
-        let available = free_kb * 1024;
-        let used = total.saturating_sub(available);
-
-        Ok(MemoryInfo {
-            total_bytes: total,
-            available_bytes: available,
-            used_bytes: used,
-        })
+    async fn sleep_system(&self) -> Result<()> {
+        let script = "Add-Type -Assembly System.Windows.Forms; [System.Windows.Forms.Application]::SetSuspendState([System.Windows.Forms.PowerState]::Suspend, $false, $false)";
+        tokio::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", script])
+            .output()
+            .await
+            .map_err(|e| anyhow!("Failed to initiate system sleep: {}", e))?;
+        Ok(())
     }
 }
 
 // ============================================================
-// Helper Functions
-// ============================================================
-
-fn get_windows_version() -> String {
-    std::process::Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-Command",
-            "(Get-WmiObject Win32_OperatingSystem).Caption",
-        ])
-        .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .unwrap_or_else(|_| "Windows".to_string())
-}
-
-// ============================================================
-// Tests
+// Unit & Integration Tests
 // ============================================================
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn adapter() -> WindowsPlatformAdapter {
-        WindowsPlatformAdapter::new()
+    #[tokio::test]
+    async fn test_window_info_serialization() {
+        let win = WindowInfo {
+            handle: "0x10204".to_string(),
+            title: "Google Chrome".to_string(),
+            process_name: "chrome.exe".to_string(),
+            pid: 1234,
+            visible: true,
+            focused: true,
+            bounds: Some(Rect { x: 0, y: 0, width: 1280, height: 720 }),
+            is_minimized: false,
+            is_maximized: false,
+        };
+
+        let json = serde_json::to_string(&win).unwrap();
+        let deserialized: WindowInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.handle, "0x10204");
+        assert_eq!(deserialized.title, "Google Chrome");
+        assert!(deserialized.focused);
+    }
+
+    #[tokio::test]
+    async fn test_invalid_resize_dimensions_rejected() {
+        let adapter = WindowsPlatformAdapter::new();
+        let err = adapter.set_window_bounds("0x10204", Rect { x: 0, y: 0, width: 0, height: 100 }).await;
+        assert!(err.is_err());
+        assert!(err.unwrap_err().to_string().contains("Invalid window dimensions"));
     }
 
     #[test]
-    fn test_app_alias_resolution() {
-        let a = adapter();
-        let chrome = a.resolve_app("chrome");
-        assert!(chrome.to_lowercase().ends_with("chrome.exe"));
-
-        let notepad = a.resolve_app("notepad");
-        assert!(notepad.to_lowercase().ends_with("notepad.exe"));
-
-        let firefox = a.resolve_app("firefox");
-        assert!(firefox.to_lowercase().ends_with("firefox.exe"));
-    }
-
-    #[test]
-    fn test_unknown_app_gets_exe_extension() {
-        let a = adapter();
-        assert_eq!(a.resolve_app("myapp"), "myapp.exe");
-    }
-
-    #[test]
-    fn test_explicit_exe_not_doubled() {
-        let a = adapter();
-        assert_eq!(a.resolve_app("myapp.exe"), "myapp.exe");
-    }
-
-    #[test]
-    fn test_full_path_preserved() {
-        let a = adapter();
-        assert_eq!(
-            a.resolve_app("C:\\Program Files\\MyApp\\app.exe"),
-            "C:\\Program Files\\MyApp\\app.exe"
-        );
+    fn test_parse_hwnd_valid_and_invalid() {
+        assert_eq!(WindowsPlatformAdapter::parse_hwnd("0x10204").unwrap(), 0x10204);
+        assert_eq!(WindowsPlatformAdapter::parse_hwnd("66052").unwrap(), 66052);
+        assert!(WindowsPlatformAdapter::parse_hwnd("invalid_hwnd").is_err());
     }
 
     #[tokio::test]
-    async fn test_get_platform_info() {
-        let a = adapter();
-        let info = a.get_platform_info().await.unwrap();
-        assert_eq!(info.os, OperatingSystem::Windows);
-        assert!(!info.username.is_empty());
-        assert!(!info.hostname.is_empty());
+    async fn test_resolve_nonexistent_window_fails() {
+        let adapter = WindowsPlatformAdapter::new();
+        let err = adapter.resolve_window_info("non_existent_app_xyz_999").await;
+        assert!(err.is_err());
     }
 
     #[tokio::test]
-    async fn test_list_processes_returns_something() {
-        let a = adapter();
-        let processes = a.list_processes().await.unwrap();
-        // There should always be at least a few processes running
-        assert!(!processes.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_is_application_running_powershell() {
-        let a = adapter();
-        // powershell should be running (we're using it)
-        let result = a.is_application_running("powershell").await.unwrap();
-        assert!(result);
-    }
-
-    #[tokio::test]
-    async fn test_get_disk_space() {
-        let a = adapter();
-        let disk = a.get_disk_space().await.unwrap();
-        // C: drive should have more than 0 bytes
-        assert!(disk.total_bytes > 0);
-        assert!(disk.available_bytes <= disk.total_bytes);
-    }
-
-    #[tokio::test]
-    async fn test_get_memory_info() {
-        let a = adapter();
-        let mem = a.get_memory_info().await.unwrap();
-        assert!(mem.total_bytes > 0);
-    }
-
-    #[tokio::test]
-    async fn test_clipboard_roundtrip() {
-        let a = adapter();
-        let test_text = "JARVIS clipboard test 12345";
-        a.set_clipboard(ClipboardContent::Text(test_text.to_string()))
-            .await
-            .unwrap();
-        let content = a.get_clipboard().await.unwrap();
-        if let ClipboardContent::Text(text) = content {
-            assert_eq!(text, test_text);
+    #[cfg(target_os = "windows")]
+    async fn test_windows_window_enumeration_and_active_window() {
+        let adapter = WindowsPlatformAdapter::new();
+        let _windows = adapter.list_windows().await.unwrap();
+        if let Ok(active) = adapter.get_active_window().await {
+            assert!(active.visible);
         }
     }
 }

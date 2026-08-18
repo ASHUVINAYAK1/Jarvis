@@ -4,7 +4,7 @@
 //! continuous audio capture, event bus, and JARVIS Core Orchestrator.
 
 use std::sync::Arc;
-use tauri::{Emitter, State};
+use tauri::{Emitter, Manager, State};
 use tokio::sync::Mutex;
 use tracing::info;
 
@@ -57,6 +57,67 @@ async fn get_platform_info(
         .map_err(|e| e.to_string())
 }
 
+/// Security Helper: Verifies that a given file path is canonical and strictly resides inside the JARVIS screenshots directory.
+pub fn validate_screenshot_path(file_path: &str) -> Result<std::path::PathBuf, String> {
+    if file_path.contains("..") || file_path.contains("../") || file_path.contains("..\\") {
+        return Err("Path traversal forbidden".to_string());
+    }
+
+    let allowed_dir = jarvis_tools::get_jarvis_screenshots_dir();
+    let canonical_allowed = allowed_dir
+        .canonicalize()
+        .unwrap_or_else(|_| allowed_dir.clone());
+
+    let raw_path = std::path::Path::new(file_path);
+    let canonical_file = raw_path
+        .canonicalize()
+        .map_err(|e| format!("Invalid screenshot file path '{}': {}", file_path, e))?;
+
+    if !canonical_file.starts_with(&canonical_allowed) {
+        return Err(format!(
+            "Security violation: path '{}' is outside the JARVIS screenshot directory",
+            file_path
+        ));
+    }
+
+    Ok(canonical_file)
+}
+
+#[tauri::command]
+async fn get_screenshot_base64(path: String) -> Result<String, String> {
+    let canonical = validate_screenshot_path(&path)?;
+    let bytes = tokio::fs::read(&canonical)
+        .await
+        .map_err(|e| format!("Failed to read screenshot file: {}", e))?;
+
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Ok(format!("data:image/png;base64,{}", b64))
+}
+
+#[tauri::command]
+async fn open_screenshot(path: String) -> Result<String, String> {
+    let canonical = validate_screenshot_path(&path)?;
+
+    #[cfg(target_os = "windows")]
+    {
+        tokio::process::Command::new("explorer")
+            .arg(&canonical)
+            .spawn()
+            .map_err(|e| format!("Failed to open image: {}", e))?;
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        tokio::process::Command::new("xdg-open")
+            .arg(&canonical)
+            .spawn()
+            .map_err(|e| format!("Failed to open image: {}", e))?;
+    }
+
+    Ok("SUCCESS".to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     init_logging();
@@ -94,6 +155,41 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .manage(jarvis_state)
         .setup(move |app| {
+            // Configure System Tray Menu & Icon
+            let toggle_hud = tauri::menu::MenuItemBuilder::with_id("toggle_hud", "Show / Hide JARVIS HUD").build(app)?;
+            let pause_assistant = tauri::menu::MenuItemBuilder::with_id("toggle_assistant", "Pause / Resume Assistant").build(app)?;
+            let quit = tauri::menu::MenuItemBuilder::with_id("quit", "Quit JARVIS").build(app)?;
+
+            let tray_menu = tauri::menu::MenuBuilder::new(app)
+                .items(&[&toggle_hud, &pause_assistant, &quit])
+                .build()?;
+
+            let _tray = tauri::tray::TrayIconBuilder::new()
+                .menu(&tray_menu)
+                .on_menu_event(|app: &tauri::AppHandle, event: tauri::menu::MenuEvent| {
+                    match event.id().as_ref() {
+                        "toggle_hud" => {
+                            if let Some(window) = app.get_webview_window("main") {
+                                let is_vis = window.is_visible().unwrap_or(false);
+                                if is_vis {
+                                    let _ = window.hide();
+                                } else {
+                                    let _ = window.show();
+                                    let _ = window.set_focus();
+                                }
+                            }
+                        }
+                        "toggle_assistant" => {
+                            info!("System Tray: Assistant toggle clicked");
+                        }
+                        "quit" => {
+                            app.exit(0);
+                        }
+                        _ => {}
+                    }
+                })
+                .build(app)?;
+
             let handle = app.handle().clone();
             let bus = bus_ref.clone();
             tauri::async_runtime::spawn(async move {
@@ -126,8 +222,23 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             execute_command,
             trigger_wake_word,
-            get_platform_info
+            get_platform_info,
+            get_screenshot_base64,
+            open_screenshot
         ])
         .run(tauri::generate_context!())
         .expect("error while running JARVIS desktop application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_screenshot_path_security() {
+        // Path traversal attempts must be rejected
+        assert!(validate_screenshot_path("../etc/passwd").is_err());
+        assert!(validate_screenshot_path("..\\Windows\\System32\\cmd.exe").is_err());
+        assert!(validate_screenshot_path("C:\\Users\\Admin\\Pictures\\JARVIS\\Screenshots\\..\\secret.txt").is_err());
+    }
 }

@@ -82,6 +82,12 @@ pub struct WindowInfo {
     pub focused: bool,
     /// Window geometry
     pub bounds: Option<Rect>,
+    /// Whether the window is minimized
+    #[serde(default)]
+    pub is_minimized: bool,
+    /// Whether the window is maximized
+    #[serde(default)]
+    pub is_maximized: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -251,6 +257,15 @@ pub trait PlatformAdapter: Send + Sync {
     /// Get a list of all visible windows.
     async fn list_windows(&self) -> Result<Vec<WindowInfo>>;
 
+    /// Get the currently active/focused foreground window.
+    async fn get_active_window(&self) -> Result<WindowInfo> {
+        let windows = self.list_windows().await?;
+        windows
+            .into_iter()
+            .find(|w| w.focused)
+            .ok_or_else(|| anyhow::anyhow!("No active foreground window found"))
+    }
+
     /// Focus a specific window (bring to front).
     async fn focus_window(&self, window_handle: &str) -> Result<()>;
 
@@ -259,6 +274,12 @@ pub trait PlatformAdapter: Send + Sync {
 
     /// Maximize a window.
     async fn maximize_window(&self, window_handle: &str) -> Result<()>;
+
+    /// Restore a window to normal windowed state.
+    async fn restore_window(&self, window_handle: &str) -> Result<()> {
+        let _ = window_handle;
+        Err(anyhow::anyhow!("Restore window not implemented on this platform"))
+    }
 
     /// Resize and/or move a window.
     async fn set_window_bounds(&self, window_handle: &str, bounds: Rect) -> Result<()>;
@@ -302,6 +323,49 @@ pub trait PlatformAdapter: Send + Sync {
 
     /// Get memory usage.
     async fn get_memory_info(&self) -> Result<MemoryInfo>;
+
+    // --------------------------------------------------------
+    // System Control & Power Management
+    // --------------------------------------------------------
+
+    /// Get current master volume level (0..100).
+    async fn get_system_volume(&self) -> Result<u32> {
+        Err(anyhow::anyhow!("get_system_volume not implemented on this platform"))
+    }
+
+    /// Set master volume level (0..100).
+    async fn set_system_volume(&self, level: u32) -> Result<()> {
+        let _ = level;
+        Err(anyhow::anyhow!("set_system_volume not implemented on this platform"))
+    }
+
+    /// Mute or unmute system audio.
+    async fn set_system_mute(&self, mute: bool) -> Result<()> {
+        let _ = mute;
+        Err(anyhow::anyhow!("set_system_mute not implemented on this platform"))
+    }
+
+    /// Lock workstation/session.
+    async fn lock_workstation(&self) -> Result<()> {
+        Err(anyhow::anyhow!("lock_workstation not implemented on this platform"))
+    }
+
+    /// Shutdown operating system.
+    async fn shutdown_system(&self, force: bool) -> Result<()> {
+        let _ = force;
+        Err(anyhow::anyhow!("shutdown_system not implemented on this platform"))
+    }
+
+    /// Restart operating system.
+    async fn restart_system(&self, force: bool) -> Result<()> {
+        let _ = force;
+        Err(anyhow::anyhow!("restart_system not implemented on this platform"))
+    }
+
+    /// Put system into sleep/suspend state.
+    async fn sleep_system(&self) -> Result<()> {
+        Err(anyhow::anyhow!("sleep_system not implemented on this platform"))
+    }
 }
 
 // --------------------------------------------------------
